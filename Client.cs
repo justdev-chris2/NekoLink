@@ -174,7 +174,7 @@ class NekoLinkClient
         
         statusLabel = new Label();
         statusLabel.Text = "Connected";
-        statusLabel.ForeColor = Color.LightGreen;
+        statusLabel.ForeColor = Color.Green;
         statusLabel.Location = new Point(350, 10);
         statusLabel.Size = new Size(200, 20);
         controlPanel.Controls.Add(statusLabel);
@@ -197,7 +197,6 @@ class NekoLinkClient
                 int remoteX = (int)(e.X * ratioX);
                 int remoteY = (int)(e.Y * ratioY);
                 SendMouse(remoteX, remoteY);
-                Log($"Mouse move: {remoteX},{remoteY}");
             }
         };
         
@@ -209,7 +208,6 @@ class NekoLinkClient
                 int remoteX = (int)(e.X * ratioX);
                 int remoteY = (int)(e.Y * ratioY);
                 SendClick(remoteX, remoteY, e.Button.ToString());
-                Log($"Click: {remoteX},{remoteY} {e.Button}");
             }
         };
         
@@ -238,7 +236,6 @@ class NekoLinkClient
             if (keyboardLocked && !e.Control)
             {
                 SendKey((byte)e.KeyCode, true);
-                Log($"Key down: {e.KeyCode}");
             }
         };
         
@@ -246,7 +243,6 @@ class NekoLinkClient
             if (keyboardLocked)
             {
                 SendKey((byte)e.KeyCode, false);
-                Log($"Key up: {e.KeyCode}");
             }
         };
         
@@ -304,14 +300,22 @@ class NekoLinkClient
             {
                 byte[] lenBytes = new byte[4];
                 int read = stream.Read(lenBytes, 0, 4);
-                if (read == 0) break;
+                if (read == 0) 
+                {
+                    // Connection closed gracefully
+                    break;
+                }
                 
                 int len = BitConverter.ToInt32(lenBytes, 0);
                 
                 byte[] imgData = new byte[len];
                 int total = 0;
                 while (total < len)
-                    total += stream.Read(imgData, total, len - total);
+                {
+                    int bytesRead = stream.Read(imgData, total, len - total);
+                    if (bytesRead == 0) throw new Exception("Connection lost");
+                    total += bytesRead;
+                }
                 
                 using (MemoryStream ms = new MemoryStream(imgData))
                 {
@@ -338,8 +342,10 @@ class NekoLinkClient
             }
         }
         
-        // Connection lost
+        // Connection lost - update UI
         pictureBox.Invoke((MethodInvoker)delegate { 
+            statusLabel.Text = "DISCONNECTED";
+            statusLabel.ForeColor = Color.Red;
             MessageBox.Show("Connection to server lost");
             Application.Exit();
         });
