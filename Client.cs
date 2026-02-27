@@ -3,9 +3,7 @@ using System.Drawing;
 using System.Net.Sockets;
 using System.Windows.Forms;
 using System.Diagnostics;
-using System.Threading;
 using System.IO;
-using Timer = System.Windows.Forms.Timer;
 
 class NekoLinkClient
 {
@@ -13,18 +11,16 @@ class NekoLinkClient
     static NetworkStream controlStream;
     static bool keyboardLocked = false;
     static Form form;
-    static Panel controlPanel;
     static Label statusLabel;
     static Button lockBtn;
     static Button unlockBtn;
     static Process ffmpegProcess;
     static StreamWriter log;
-    static TextBox debugBox;
     
     [STAThread]
     static void Main(string[] args)
     {
-        // Setup logging
+        // Setup logging to file only
         log = new StreamWriter("client_debug.txt", true);
         Log("Client starting...");
         
@@ -58,7 +54,7 @@ class NekoLinkClient
         Log("Starting ffmpeg video...");
         StartVideo(serverIp);
         
-        // Create GUI
+        // Create simple control window
         CreateWindow();
         
         Application.Run(form);
@@ -70,10 +66,9 @@ class NekoLinkClient
         {
             string ffmpeg = "ffmpeg.exe";
             
-            // Check if ffmpeg exists
             if (!File.Exists(ffmpeg))
             {
-                Log($"ERROR: {ffmpeg} not found in current directory!");
+                Log($"ERROR: {ffmpeg} not found!");
                 MessageBox.Show("ffmpeg.exe not found! Put it in the same folder.");
                 return;
             }
@@ -84,14 +79,13 @@ class NekoLinkClient
             ffmpegProcess.StartInfo.FileName = ffmpeg;
             ffmpegProcess.StartInfo.Arguments = $"-i udp://{serverIp}:5900?pkt_size=1316 -f sdl \"NekoLink - {serverIp}\"";
             ffmpegProcess.StartInfo.UseShellExecute = false;
-            ffmpegProcess.StartInfo.CreateNoWindow = false;
+            ffmpegProcess.StartInfo.CreateNoWindow = true;
             ffmpegProcess.StartInfo.RedirectStandardError = true;
-            ffmpegProcess.StartInfo.RedirectStandardOutput = true;
             
             ffmpegProcess.Start();
             Log($"ffmpeg started with PID: {ffmpegProcess.Id}");
             
-            // Read ffmpeg output for debugging
+            // Log ffmpeg errors to file only
             ffmpegProcess.BeginErrorReadLine();
             ffmpegProcess.ErrorDataReceived += (s, e) => {
                 if (!string.IsNullOrEmpty(e.Data))
@@ -109,42 +103,31 @@ class NekoLinkClient
     {
         form = new Form();
         form.Text = "NekoLink Control";
-        form.Size = new Size(400, 300);
+        form.Size = new Size(300, 150);
         form.StartPosition = FormStartPosition.CenterScreen;
         form.TopMost = true;
         form.FormBorderStyle = FormBorderStyle.FixedToolWindow;
         form.KeyPreview = true;
         
-        controlPanel = new Panel();
-        controlPanel.Dock = DockStyle.Fill;
-        controlPanel.Padding = new Padding(10);
-        
-        Label infoLabel = new Label();
-        infoLabel.Text = "NekoLink Connected";
-        infoLabel.Dock = DockStyle.Top;
-        infoLabel.Height = 30;
-        infoLabel.TextAlign = ContentAlignment.MiddleCenter;
-        infoLabel.Font = new Font("Arial", 10, FontStyle.Bold);
-        
         statusLabel = new Label();
         statusLabel.Text = "Status: Unlocked";
         statusLabel.Dock = DockStyle.Top;
-        statusLabel.Height = 25;
+        statusLabel.Height = 30;
         statusLabel.TextAlign = ContentAlignment.MiddleCenter;
+        statusLabel.Font = new Font("Arial", 10, FontStyle.Bold);
         
         FlowLayoutPanel buttonPanel = new FlowLayoutPanel();
-        buttonPanel.Dock = DockStyle.Top;
-        buttonPanel.Height = 40;
+        buttonPanel.Dock = DockStyle.Fill;
         buttonPanel.FlowDirection = FlowDirection.LeftToRight;
-        buttonPanel.Padding = new Padding(5);
+        buttonPanel.Padding = new Padding(10);
         
         lockBtn = new Button();
-        lockBtn.Text = "🔒 Lock";
+        lockBtn.Text = "Lock";
         lockBtn.Size = new Size(80, 30);
         lockBtn.Click += (s, e) => Lock();
         
         unlockBtn = new Button();
-        unlockBtn.Text = "🔓 Unlock";
+        unlockBtn.Text = "Unlock";
         unlockBtn.Size = new Size(80, 30);
         unlockBtn.Click += (s, e) => Unlock();
         
@@ -163,46 +146,8 @@ class NekoLinkClient
         buttonPanel.Controls.Add(unlockBtn);
         buttonPanel.Controls.Add(fullscreenBtn);
         
-        // Debug output box
-        debugBox = new TextBox();
-        debugBox.Dock = DockStyle.Fill;
-        debugBox.Multiline = true;
-        debugBox.ScrollBars = ScrollBars.Vertical;
-        debugBox.ReadOnly = true;
-        debugBox.Font = new Font("Consolas", 8);
-        debugBox.Text = "Debug output:\r\n";
-        
-        // Add debug updates from log
-        Timer debugTimer = new Timer();
-        debugTimer.Interval = 500;
-        debugTimer.Tick += (s, e) => {
-            if (log != null)
-            {
-                log.Flush();
-                try
-                {
-                    if (File.Exists("client_debug.txt"))
-                    {
-                        string lastLines = File.ReadAllText("client_debug.txt");
-                        if (debugBox.Text.Length > 10000)
-                            debugBox.Text = "Debug output:\r\n" + lastLines.Substring(Math.Max(0, lastLines.Length - 5000));
-                        else
-                            debugBox.Text = "Debug output:\r\n" + lastLines;
-                        debugBox.SelectionStart = debugBox.Text.Length;
-                        debugBox.ScrollToCaret();
-                    }
-                }
-                catch { }
-            }
-        };
-        debugTimer.Start();
-        
-        controlPanel.Controls.Add(debugBox);
-        controlPanel.Controls.Add(buttonPanel);
-        controlPanel.Controls.Add(statusLabel);
-        controlPanel.Controls.Add(infoLabel);
-        
-        form.Controls.Add(controlPanel);
+        form.Controls.Add(buttonPanel);
+        form.Controls.Add(statusLabel);
         
         // Keyboard events
         form.KeyDown += (s, e) => {
@@ -227,10 +172,7 @@ class NekoLinkClient
         
         form.FormClosing += (s, e) => {
             Log("Closing...");
-            try { 
-                if (ffmpegProcess != null && !ffmpegProcess.HasExited)
-                    ffmpegProcess.Kill(); 
-            } catch { }
+            try { ffmpegProcess?.Kill(); } catch { }
         };
     }
     
@@ -274,13 +216,8 @@ class NekoLinkClient
     {
         try
         {
-            string logMsg = $"{DateTime.Now:HH:mm:ss} - {message}";
-            Console.WriteLine(logMsg);
-            if (log != null)
-            {
-                log.WriteLine(logMsg);
-                log.Flush();
-            }
+            log.WriteLine($"{DateTime.Now:HH:mm:ss} - {message}");
+            log.Flush();
         }
         catch { }
     }
