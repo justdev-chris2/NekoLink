@@ -1,11 +1,9 @@
 using System;
-using System.Diagnostics;
+using System.Drawing;
 using System.Net.Sockets;
 using System.Windows.Forms;
+using System.Diagnostics;
 using System.Threading;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Windows.Forms.VisualStyles;
 
 class NekoLinkClient
 {
@@ -13,20 +11,22 @@ class NekoLinkClient
     static NetworkStream controlStream;
     static bool keyboardLocked = false;
     static Form form;
-    static PictureBox pictureBox;
+    static Panel controlPanel;
+    static Label statusLabel;
+    static Button lockBtn;
+    static Button unlockBtn;
+    static Process ffmpegProcess;
     
     [STAThread]
     static void Main(string[] args)
     {
-        if (args.Length == 0)
-        {
-            Console.Write("Enter server IP: ");
-            string ip = Console.ReadLine();
-            args = new[] { ip };
-        }
+        string serverIp = args.Length > 0 ? args[0] : "";
         
-        string serverIp = args[0];
-        Console.WriteLine($"Connecting to {serverIp}...");
+        if (string.IsNullOrEmpty(serverIp))
+        {
+            serverIp = Microsoft.VisualBasic.Interaction.InputBox("Enter server IP:", "NekoLink", "192.168.1.", 500, 500);
+            if (string.IsNullOrEmpty(serverIp)) return;
+        }
         
         try
         {
@@ -34,83 +34,123 @@ class NekoLinkClient
             controlClient = new TcpClient();
             controlClient.Connect(serverIp, 5901);
             controlStream = controlClient.GetStream();
-            Console.WriteLine("Control channel connected");
         }
-        catch (Exception ex)
+        catch
         {
-            Console.WriteLine($"Failed to connect control channel: {ex.Message}");
+            MessageBox.Show("Could not connect to control server");
             return;
         }
         
-        // Start video (ffmpeg window)
-        try
-        {
-            string ffmpeg = "ffmpeg.exe";
-            Process process = new Process();
-            process.StartInfo.FileName = ffmpeg;
-            process.StartInfo.Arguments = $"-i udp://{serverIp}:5900?pkt_size=1316 -f sdl \"NekoLink - {serverIp}\"";
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.CreateNoWindow = true;
-            process.Start();
-            Console.WriteLine("Video player started");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Failed to start video: {ex.Message}");
-            Console.WriteLine("Make sure ffmpeg.exe is in the same folder");
-        }
+        // Start ffmpeg video in a window
+        StartVideo(serverIp);
         
-        // Create control overlay window
-        CreateOverlay();
+        // Create GUI
+        CreateWindow();
         
         Application.Run(form);
     }
     
-    static void CreateOverlay()
+    static void StartVideo(string serverIp)
+    {
+        string ffmpeg = "ffmpeg.exe";
+        ffmpegProcess = new Process();
+        ffmpegProcess.StartInfo.FileName = ffmpeg;
+        ffmpegProcess.StartInfo.Arguments = $"-i udp://{serverIp}:5900?pkt_size=1316 -f sdl \"NekoLink - {serverIp}\"";
+        ffmpegProcess.StartInfo.UseShellExecute = false;
+        ffmpegProcess.StartInfo.CreateNoWindow = true;
+        ffmpegProcess.Start();
+    }
+    
+    static void CreateWindow()
     {
         form = new Form();
         form.Text = "NekoLink Control";
-        form.FormBorderStyle = FormBorderStyle.FixedToolWindow;
-        form.Size = new System.Drawing.Size(300, 120);
+        form.Size = new Size(300, 150);
         form.StartPosition = FormStartPosition.CenterScreen;
         form.TopMost = true;
+        form.FormBorderStyle = FormBorderStyle.FixedToolWindow;
         form.KeyPreview = true;
         
-        Label lbl = new Label();
-        lbl.Text = "NekoLink Active\nClick to lock\nRight Ctrl to unlock";
-        lbl.Dock = DockStyle.Fill;
-        lbl.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-        lbl.Font = new Font("Arial", 10, FontStyle.Bold);
-        form.Controls.Add(lbl);
+        controlPanel = new Panel();
+        controlPanel.Dock = DockStyle.Fill;
+        controlPanel.Padding = new Padding(10);
         
-        form.Click += (s, e) => {
-            keyboardLocked = true;
-            lbl.BackColor = System.Drawing.Color.LightGreen;
-            lbl.Text = "🔒 LOCKED\nRight Ctrl to unlock";
-        };
+        Label infoLabel = new Label();
+        infoLabel.Text = "NekoLink Connected";
+        infoLabel.Dock = DockStyle.Top;
+        infoLabel.Height = 30;
+        infoLabel.TextAlign = ContentAlignment.MiddleCenter;
         
+        statusLabel = new Label();
+        statusLabel.Text = "Status: Unlocked";
+        statusLabel.Dock = DockStyle.Top;
+        statusLabel.Height = 25;
+        statusLabel.TextAlign = ContentAlignment.MiddleCenter;
+        
+        FlowLayoutPanel buttonPanel = new FlowLayoutPanel();
+        buttonPanel.Dock = DockStyle.Top;
+        buttonPanel.Height = 40;
+        buttonPanel.FlowDirection = FlowDirection.LeftToRight;
+        buttonPanel.Padding = new Padding(5);
+        
+        lockBtn = new Button();
+        lockBtn.Text = "Lock";
+        lockBtn.Size = new Size(80, 30);
+        lockBtn.Click += (s, e) => Lock();
+        
+        unlockBtn = new Button();
+        unlockBtn.Text = "Unlock";
+        unlockBtn.Size = new Size(80, 30);
+        unlockBtn.Click += (s, e) => Unlock();
+        
+        buttonPanel.Controls.Add(lockBtn);
+        buttonPanel.Controls.Add(unlockBtn);
+        
+        controlPanel.Controls.Add(buttonPanel);
+        controlPanel.Controls.Add(statusLabel);
+        controlPanel.Controls.Add(infoLabel);
+        
+        form.Controls.Add(controlPanel);
+        
+        // Keyboard events
         form.KeyDown += (s, e) => {
             if (e.Control && e.KeyCode == Keys.RControlKey)
             {
-                keyboardLocked = false;
-                lbl.BackColor = SystemColors.Control;
-                lbl.Text = "NekoLink Active\nClick to lock\nRight Ctrl to unlock";
-                Console.WriteLine("Unlocked");
+                Unlock();
             }
             
             if (keyboardLocked && !e.Control)
             {
                 SendKey((byte)e.KeyCode, true);
-                Console.WriteLine($"Key down: {e.KeyCode}");
             }
         };
         
         form.KeyUp += (s, e) => {
-            if (keyboardLocked && !e.Control)
+            if (keyboardLocked)
             {
                 SendKey((byte)e.KeyCode, false);
             }
         };
+        
+        form.FormClosing += (s, e) => {
+            try { ffmpegProcess.Kill(); } catch { }
+        };
+    }
+    
+    static void Lock()
+    {
+        keyboardLocked = true;
+        statusLabel.Text = "Status: LOCKED";
+        statusLabel.ForeColor = Color.Red;
+        form.Text = "NekoLink Control [LOCKED]";
+    }
+    
+    static void Unlock()
+    {
+        keyboardLocked = false;
+        statusLabel.Text = "Status: Unlocked";
+        statusLabel.ForeColor = Color.Green;
+        form.Text = "NekoLink Control";
     }
     
     static void SendCommand(string cmd)
@@ -120,10 +160,7 @@ class NekoLinkClient
             byte[] data = System.Text.Encoding.ASCII.GetBytes(cmd);
             controlStream.Write(data, 0, data.Length);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Send error: {ex.Message}");
-        }
+        catch { }
     }
     
     static void SendKey(byte key, bool down)
