@@ -10,8 +10,10 @@ class NekoLinkServer
         TcpListener server = new TcpListener(System.Net.IPAddress.Any, 5900);
         server.Start();
         Console.WriteLine("NekoLink Server started on port 5900");
+        Console.WriteLine("Waiting for connection...");
         
         TcpClient client = server.AcceptTcpClient();
+        Console.WriteLine("Client connected!");
         NetworkStream stream = client.GetStream();
         
         while (true)
@@ -63,7 +65,7 @@ class NekoLinkServer
                 }
             }
             
-            System.Threading.Thread.Sleep(66);
+            System.Threading.Thread.Sleep(100); // 10 fps
         }
     }
     
