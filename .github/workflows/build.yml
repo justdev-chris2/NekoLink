@@ -36,8 +36,7 @@ jobs:
     - name: Build Server
       run: |
         $libvlc = Resolve-Path "packages\LibVLCSharp.*\lib\netstandard2.0\LibVLCSharp.dll" | Select-Object -First 1
-        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe /target:winexe /reference:$libvlc /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
-      shell: pwsh
+        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe /target:winexe /reference:$libvlc /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:"C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8\netstandard.dll"
     
     - name: Build Client
       run: |
