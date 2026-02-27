@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Drawing;
 using System.IO;
+using Timer = System.Windows.Forms.Timer;
 
 class NekoLinkServer
 {
@@ -39,7 +40,7 @@ class NekoLinkServer
         trayIcon.Visible = true;
         
         ContextMenuStrip menu = new ContextMenuStrip();
-        menu.Items.Add("Show Debug", null, (s, e) => { window?.Show(); window?.WindowState = FormWindowState.Normal; });
+        menu.Items.Add("Show Debug", null, (s, e) => { window?.Show(); window.WindowState = FormWindowState.Normal; });
         menu.Items.Add("Restart Video", null, (s, e) => RestartVideo());
         menu.Items.Add("Exit", null, (s, e) => { Log("Shutting down..."); Application.Exit(); Environment.Exit(0); });
         trayIcon.ContextMenuStrip = menu;
@@ -230,8 +231,8 @@ class NekoLinkServer
         {
             string logMsg = $"{DateTime.Now:HH:mm:ss} - {message}";
             Console.WriteLine(logMsg);
-            log?.WriteLine(logMsg);
-            log?.Flush();
+            if (log != null) log.WriteLine(logMsg);
+            if (log != null) log.Flush();
         }
         catch { }
     }
