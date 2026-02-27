@@ -171,6 +171,7 @@ class NekoLinkServer : Form
                         int read = stream.Read(buffer, 0, buffer.Length);
                         string command = System.Text.Encoding.ASCII.GetString(buffer, 0, read);
                         
+                        Log("CMD: " + command); // Debug log
                         string[] parts = command.Split(',');
                         
                         switch(parts[0])
@@ -206,7 +207,7 @@ class NekoLinkServer : Form
                         }
                     }
                     
-                    Thread.Sleep(1000 / fps); // Dynamic FPS
+                    Thread.Sleep(1000 / fps);
                 }
                 catch (Exception ex)
                 {
