@@ -17,6 +17,7 @@ class NekoLinkServer : Form
     static TextBox fpsBox;
     static ListBox logBox;
     static Thread serverThread;
+    static Label statusLabel;
     
     [STAThread]
     static void Main()
@@ -69,18 +70,17 @@ class NekoLinkServer : Form
         this.Controls.Add(logBox);
         
         // Status
-        Label statusLabel = new Label();
+        statusLabel = new Label();
         statusLabel.Text = "Status: Starting...";
         statusLabel.Location = new Point(10, 320);
         statusLabel.Size = new Size(200, 20);
-        statusLabel.Name = "statusLabel";
         this.Controls.Add(statusLabel);
         
         // Setup tray
         SetupTray();
         
         // Start server
-        serverThread = new Thread(() => RunServer(statusLabel));
+        serverThread = new Thread(() => RunServer());
         serverThread.Start();
     }
     
@@ -122,13 +122,17 @@ class NekoLinkServer : Form
     
     void Log(string msg)
     {
-        this.Invoke((MethodInvoker)delegate {
-            logBox.Items.Add(DateTime.Now.ToString("HH:mm:ss") + " - " + msg);
-            logBox.TopIndex = logBox.Items.Count - 1;
-        });
+        try
+        {
+            this.Invoke((MethodInvoker)delegate {
+                logBox.Items.Add(DateTime.Now.ToString("HH:mm:ss") + " - " + msg);
+                logBox.TopIndex = logBox.Items.Count - 1;
+            });
+        }
+        catch { }
     }
     
-    void RunServer(Label statusLabel)
+    void RunServer()
     {
         try
         {
@@ -138,6 +142,7 @@ class NekoLinkServer : Form
             
             this.Invoke((MethodInvoker)delegate {
                 statusLabel.Text = "Status: Waiting for connection...";
+                statusLabel.ForeColor = Color.Orange;
             });
             
             TcpClient client = server.AcceptTcpClient();
@@ -146,6 +151,7 @@ class NekoLinkServer : Form
             Log("Client connected!");
             this.Invoke((MethodInvoker)delegate {
                 statusLabel.Text = "Status: Client connected";
+                statusLabel.ForeColor = Color.Green;
             });
             
             while (running)
@@ -167,43 +173,62 @@ class NekoLinkServer : Form
                     // Handle commands
                     if (stream.DataAvailable)
                     {
-                        byte[] buffer = new byte[1024];
-                        int read = stream.Read(buffer, 0, buffer.Length);
-                        string command = System.Text.Encoding.ASCII.GetString(buffer, 0, read);
-                        
-                        Log("CMD: " + command); // Debug log
-                        string[] parts = command.Split(',');
-                        
-                        switch(parts[0])
+                        try
                         {
-                            case "MOUSE":
-                                Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
-                                break;
-                                
-                            case "CLICK":
-                                Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
-                                if (parts[3].Contains("Left"))
+                            byte[] buffer = new byte[1024];
+                            int read = stream.Read(buffer, 0, buffer.Length);
+                            string command = System.Text.Encoding.ASCII.GetString(buffer, 0, read);
+                            
+                            Log("CMD: " + command);
+                            string[] parts = command.Split(',');
+                            
+                            if (parts.Length > 0)
+                            {
+                                switch(parts[0])
                                 {
-                                    mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
-                                    mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                                    case "MOUSE":
+                                        if (parts.Length >= 3 && int.TryParse(parts[1], out int x) && int.TryParse(parts[2], out int y))
+                                            Cursor.Position = new Point(x, y);
+                                        break;
+                                        
+                                    case "CLICK":
+                                        if (parts.Length >= 4 && int.TryParse(parts[1], out int cx) && int.TryParse(parts[2], out int cy))
+                                        {
+                                            Cursor.Position = new Point(cx, cy);
+                                            if (parts[3].Contains("Left"))
+                                            {
+                                                mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
+                                                mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                                            }
+                                            else if (parts[3].Contains("Right"))
+                                            {
+                                                mouse_event(0x08, 0, 0, 0, UIntPtr.Zero);
+                                                mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
+                                            }
+                                        }
+                                        break;
+                                        
+                                    case "KEY":
+                                        if (parts.Length >= 3 && byte.TryParse(parts[1], out byte key))
+                                        {
+                                            uint flags = parts[2] == "True" ? 0u : 2u;
+                                            keybd_event(key, 0, flags, UIntPtr.Zero);
+                                        }
+                                        break;
+                                        
+                                    case "SET_FPS":
+                                        if (parts.Length >= 2 && int.TryParse(parts[1], out int newFps) && newFps > 0)
+                                        {
+                                            fps = newFps;
+                                            this.Invoke((MethodInvoker)delegate { fpsBox.Text = fps.ToString(); });
+                                        }
+                                        break;
                                 }
-                                else if (parts[3].Contains("Right"))
-                                {
-                                    mouse_event(0x08, 0, 0, 0, UIntPtr.Zero);
-                                    mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
-                                }
-                                break;
-                                
-                            case "KEY":
-                                uint flags = parts[2] == "True" ? 0u : 2u;
-                                keybd_event(byte.Parse(parts[1]), 0, flags, UIntPtr.Zero);
-                                break;
-                                
-                            case "SET_FPS":
-                                int newFps = int.Parse(parts[1]);
-                                if (newFps > 0) fps = newFps;
-                                this.Invoke((MethodInvoker)delegate { fpsBox.Text = fps.ToString(); });
-                                break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log("Command error: " + ex.Message);
                         }
                     }
                     
@@ -211,7 +236,28 @@ class NekoLinkServer : Form
                 }
                 catch (Exception ex)
                 {
-                    Log("Error: " + ex.Message);
+                    Log("Loop error: " + ex.Message);
+                    
+                    // Check if client disconnected
+                    if (!client.Connected)
+                    {
+                        this.Invoke((MethodInvoker)delegate {
+                            statusLabel.Text = "Status: Client disconnected";
+                            statusLabel.ForeColor = Color.Red;
+                        });
+                        Log("Client disconnected, waiting for new connection...");
+                        
+                        // Wait for new client
+                        client = server.AcceptTcpClient();
+                        stream = client.GetStream();
+                        
+                        this.Invoke((MethodInvoker)delegate {
+                            statusLabel.Text = "Status: Client connected";
+                            statusLabel.ForeColor = Color.Green;
+                        });
+                        Log("New client connected!");
+                    }
+                    
                     Thread.Sleep(1000);
                 }
             }
