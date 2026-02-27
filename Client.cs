@@ -144,28 +144,29 @@ class NekoLinkClient
         controlPanel.Controls.Add(applyFps);
         
         Button lockBtn = new Button();
-lockBtn.Text = "Lock";
-lockBtn.Location = new Point(180, 7);
-lockBtn.Size = new Size(60, 23);
-lockBtn.Click += (s, e) => { 
-    keyboardLocked = true; 
-    lockBtn.BackColor = Color.LightGreen;
-    unlockBtn.BackColor = SystemColors.Control;
-    form.Text = "NekoLink - LOCKED (Press Right Ctrl to unlock)";
-};
-controlPanel.Controls.Add(lockBtn);
-
-Button unlockBtn = new Button();  // Declare BEFORE using it
-unlockBtn.Text = "Unlock";
-unlockBtn.Location = new Point(250, 7);
-unlockBtn.Size = new Size(60, 23);
-unlockBtn.Click += (s, e) => { 
-    keyboardLocked = false; 
-    unlockBtn.BackColor = Color.LightGreen;
-    lockBtn.BackColor = SystemColors.Control;
-    form.Text = "NekoLink - Remote Desktop";
-};
-controlPanel.Controls.Add(unlockBtn);
+        Button unlockBtn = new Button(); // Declare both buttons first
+        
+        lockBtn.Text = "Lock";
+        lockBtn.Location = new Point(180, 7);
+        lockBtn.Size = new Size(60, 23);
+        lockBtn.Click += (s, e) => { 
+            keyboardLocked = true; 
+            lockBtn.BackColor = Color.LightGreen;
+            unlockBtn.BackColor = SystemColors.Control;
+            form.Text = "NekoLink - LOCKED (Press Right Ctrl to unlock)";
+        };
+        controlPanel.Controls.Add(lockBtn);
+        
+        unlockBtn.Text = "Unlock";
+        unlockBtn.Location = new Point(250, 7);
+        unlockBtn.Size = new Size(60, 23);
+        unlockBtn.Click += (s, e) => { 
+            keyboardLocked = false; 
+            unlockBtn.BackColor = Color.LightGreen;
+            lockBtn.BackColor = SystemColors.Control;
+            form.Text = "NekoLink - Remote Desktop";
+        };
+        controlPanel.Controls.Add(unlockBtn);
         
         statusLabel = new Label();
         statusLabel.Text = "Connected";
