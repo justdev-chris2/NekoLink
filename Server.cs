@@ -9,22 +9,29 @@ using System.Drawing;
 class NekoLinkServer
 {
     static TcpListener controlServer;
-    static bool running = true;
+    static NotifyIcon trayIcon;
     
     static void Main()
     {
-        Console.WriteLine("NekoLink Server - FFmpeg Edition");
-        Console.WriteLine("Your IPs:");
-        foreach (var ip in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
-            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                Console.WriteLine(ip);
+        // Hide console
+        var handle = GetConsoleWindow();
+        ShowWindow(handle, 0);
         
-        // Start video stream
+        // Setup tray
+        trayIcon = new NotifyIcon();
+        trayIcon.Icon = SystemIcons.Application;
+        trayIcon.Text = "NekoLink Server";
+        trayIcon.Visible = true;
+        trayIcon.ShowBalloonTip(1000, "NekoLink", "Server running", ToolTipIcon.Info);
+        
+        // Start video
         Thread videoThread = new Thread(StartVideo);
         videoThread.Start();
         
-        // Start control server (for mouse/keyboard)
+        // Start control
         StartControlServer();
+        
+        Application.Run();
     }
     
     static void StartVideo()
@@ -43,9 +50,8 @@ class NekoLinkServer
     {
         controlServer = new TcpListener(IPAddress.Any, 5901);
         controlServer.Start();
-        Console.WriteLine("Control channel on port 5901");
         
-        while (running)
+        while (true)
         {
             var client = controlServer.AcceptTcpClient();
             ThreadPool.QueueUserWorkItem(HandleClient, client);
@@ -87,7 +93,7 @@ class NekoLinkServer
                         break;
                 }
             }
-            catch { break; }
+            catch { }
         }
     }
     
@@ -96,4 +102,10 @@ class NekoLinkServer
     
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+    
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern IntPtr GetConsoleWindow();
+    
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
