@@ -31,12 +31,12 @@ jobs:
     
     - name: Build Server
       run: |
-        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe
+        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe /target:winexe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
       shell: pwsh
     
     - name: Build Client
       run: |
-        & "$env:CSC_PATH\csc.exe" Client.cs /out:NekoLink-Client.exe /reference:Microsoft.VisualBasic.dll /reference:System.Windows.Forms.dll
+        & "$env:CSC_PATH\csc.exe" Client.cs /out:NekoLink-Client.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:Microsoft.VisualBasic.dll
       shell: pwsh
     
     - name: Upload artifacts
@@ -46,3 +46,4 @@ jobs:
         path: |
           NekoLink-Server.exe
           NekoLink-Client.exe
+          README.txt
