@@ -33,7 +33,7 @@ class NekoLinkServer
         
         // Tray icon
         trayIcon = new NotifyIcon();
-        trayIcon.Icon = SystemIcons.Application;
+        trayIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         trayIcon.Text = "NekoLink Server";
         trayIcon.Visible = true;
         trayIcon.ShowBalloonTip(1000, "NekoLink", ips, ToolTipIcon.Info);
