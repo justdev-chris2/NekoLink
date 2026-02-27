@@ -34,7 +34,7 @@ Replace IP with the server's actual IP address
 
 ```
 csc Server.cs /out:NekoLink-Server.exe
-csc Client.cs /out:NekoLink-Client.exe
+csc Client.cs /out:NekoLink-Client.exe /reference:Microsoft.VisualBasic.dll
 ```
 
 ## Notes
