@@ -19,6 +19,8 @@ class NekoLinkClient
     static int fps = 10;
     static TextBox fpsBox;
     static Label statusLabel;
+    static Button lockBtn;
+    static Button unlockBtn;
     
     [STAThread]
     static void Main(string[] args)
@@ -143,8 +145,8 @@ class NekoLinkClient
         };
         controlPanel.Controls.Add(applyFps);
         
-        Button lockBtn = new Button();
-        Button unlockBtn = new Button(); // Declare both buttons first
+        lockBtn = new Button();
+        unlockBtn = new Button();
         
         lockBtn.Text = "Lock";
         lockBtn.Location = new Point(180, 7);
@@ -154,6 +156,7 @@ class NekoLinkClient
             lockBtn.BackColor = Color.LightGreen;
             unlockBtn.BackColor = SystemColors.Control;
             form.Text = "NekoLink - LOCKED (Press Right Ctrl to unlock)";
+            Log("Manual lock");
         };
         controlPanel.Controls.Add(lockBtn);
         
@@ -165,6 +168,7 @@ class NekoLinkClient
             unlockBtn.BackColor = Color.LightGreen;
             lockBtn.BackColor = SystemColors.Control;
             form.Text = "NekoLink - Remote Desktop";
+            Log("Manual unlock");
         };
         controlPanel.Controls.Add(unlockBtn);
         
@@ -193,6 +197,7 @@ class NekoLinkClient
                 int remoteX = (int)(e.X * ratioX);
                 int remoteY = (int)(e.Y * ratioY);
                 SendMouse(remoteX, remoteY);
+                Log($"Mouse move: {remoteX},{remoteY}");
             }
         };
         
@@ -204,6 +209,7 @@ class NekoLinkClient
                 int remoteX = (int)(e.X * ratioX);
                 int remoteY = (int)(e.Y * ratioY);
                 SendClick(remoteX, remoteY, e.Button.ToString());
+                Log($"Click: {remoteX},{remoteY} {e.Button}");
             }
         };
         
@@ -213,7 +219,7 @@ class NekoLinkClient
             lockBtn.BackColor = Color.LightGreen;
             unlockBtn.BackColor = SystemColors.Control;
             form.Text = "NekoLink - LOCKED (Press Right Ctrl to unlock)";
-            Log("Keyboard locked");
+            Log("Keyboard locked by click");
         };
         
         form.Controls.Add(pictureBox);
@@ -226,12 +232,13 @@ class NekoLinkClient
                 lockBtn.BackColor = SystemColors.Control;
                 unlockBtn.BackColor = Color.LightGreen;
                 form.Text = "NekoLink - Remote Desktop";
-                Log("Keyboard unlocked");
+                Log("Keyboard unlocked by Right Ctrl");
             }
             
             if (keyboardLocked && !e.Control)
             {
                 SendKey((byte)e.KeyCode, true);
+                Log($"Key down: {e.KeyCode}");
             }
         };
         
@@ -239,6 +246,7 @@ class NekoLinkClient
             if (keyboardLocked)
             {
                 SendKey((byte)e.KeyCode, false);
+                Log($"Key up: {e.KeyCode}");
             }
         };
         
