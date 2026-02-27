@@ -65,7 +65,7 @@ class NekoLinkServer
                 }
             }
             
-            System.Threading.Thread.Sleep(100); // 10 fps
+            System.Threading.Thread.Sleep(66); // 15 fps
         }
     }
     
