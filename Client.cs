@@ -1,192 +1,116 @@
 using System;
-using System.Drawing;
 using System.Net.Sockets;
-using System.Windows.Forms;
-using System.Net;
-using System.Linq;
-using System.Diagnostics;
-using System.IO;
-using System.Security.Principal;
+using System.Text;
+using System.Threading;
 
 class NekoLinkClient
 {
     static TcpClient client;
     static NetworkStream stream;
-    static Form form;
-    static PictureBox pictureBox;
-    static bool keyboardLocked = false;
-    static StreamWriter log;
+    static bool connected = false;
+    static int fps = 10;
     
-    [STAThread]
-    static void Main(string[] args)
+    static void Main()
     {
-        // Setup logging
-        log = new StreamWriter("client_debug.txt", true);
-        Log("Client starting...");
+        Console.WriteLine("=== NekoLink Client ===");
+        Console.WriteLine();
         
-        // Check if running as admin
-        bool isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent())
-            .IsInRole(WindowsBuiltInRole.Administrator);
-        Log("Admin: " + isAdmin);
-        
-        // If not admin and no firewall rule, prompt once
-        if (!isAdmin && !CheckFirewallRule())
+        while (true)
         {
-            Log("Requesting admin for firewall...");
-            ProcessStartInfo startInfo = new ProcessStartInfo();
-            startInfo.UseShellExecute = true;
-            startInfo.WorkingDirectory = Environment.CurrentDirectory;
-            startInfo.FileName = Application.ExecutablePath;
-            startInfo.Arguments = string.Join(" ", args);
-            startInfo.Verb = "runas";
-        
+            Console.Write("Enter server IP: ");
+            string serverIp = Console.ReadLine();
+            
+            if (string.IsNullOrEmpty(serverIp))
+                continue;
+            
             try
             {
-                Process.Start(startInfo);
-                Log("Admin instance started, exiting...");
-                return;
+                Console.Write($"Connecting to {serverIp}:5900... ");
+                client = new TcpClient();
+                client.Connect(serverIp, 5900);
+                stream = client.GetStream();
+                connected = true;
+                Console.WriteLine("OK!");
+                Console.WriteLine();
+                break;
             }
             catch
             {
-                Log("User declined admin");
+                Console.WriteLine("FAILED!");
+                Console.WriteLine("Could not connect. Make sure server is running.");
+                Console.WriteLine();
             }
         }
         
-        string serverIp;
+        // Start receive thread
+        Thread receiveThread = new Thread(ReceiveLoop);
+        receiveThread.Start();
         
-        if (args.Length == 0)
+        // Command loop
+        Console.WriteLine("Connected! Commands:");
+        Console.WriteLine("  /fps [number] - Change FPS");
+        Console.WriteLine("  /lock         - Lock remote control");
+        Console.WriteLine("  /unlock       - Unlock remote control");
+        Console.WriteLine("  /quit         - Exit");
+        Console.WriteLine();
+        Console.WriteLine("Click on this window to send mouse/keyboard");
+        Console.WriteLine("Press Right Ctrl to unlock if locked");
+        Console.WriteLine();
+        
+        bool locked = false;
+        
+        while (connected)
         {
-            // Show IP selector
-            var ips = Dns.GetHostEntry(Dns.GetHostName()).AddressList
-                .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                .ToList();
+            string input = Console.ReadLine();
             
-            if (ips.Count == 0)
+            if (input.StartsWith("/fps"))
             {
-                MessageBox.Show("No network adapters found!");
-                Log("No network adapters");
-                return;
+                string[] parts = input.Split(' ');
+                if (parts.Length > 1 && int.TryParse(parts[1], out int newFps))
+                {
+                    fps = newFps;
+                    SendCommand($"SET_FPS,{fps}");
+                    Console.WriteLine($"FPS set to {fps}");
+                }
             }
-            
-            string ipList = "Available IPs on network:\n\n";
-            foreach (var ip in ips)
-                ipList += ip.ToString() + "\n";
-            
-            ipList += "\nEnter the server IP:";
-            
-            string input = Microsoft.VisualBasic.Interaction.InputBox(ipList, "NekoLink - Connect", "192.168.1.", 500, 500);
-            if (string.IsNullOrEmpty(input)) return;
-            serverIp = input;
-        }
-        else
-        {
-            serverIp = args[0];
-        }
-        
-        Log("Attempting to connect to: " + serverIp);
-        
-        try
-        {
-            client = new TcpClient();
-            client.Connect(serverIp, 5900);
-            stream = client.GetStream();
-            Log("Connected successfully!");
-        }
-        catch (Exception ex)
-        {
-            Log("Connection failed: " + ex.Message);
-            MessageBox.Show($"Could not connect to {serverIp}:5900\n\nMake sure server is running and IP is correct.");
-            return;
+            else if (input == "/lock")
+            {
+                locked = true;
+                Console.WriteLine("Remote control LOCKED");
+            }
+            else if (input == "/unlock")
+            {
+                locked = false;
+                Console.WriteLine("Remote control UNLOCKED");
+            }
+            else if (input == "/quit")
+            {
+                break;
+            }
+            else if (!string.IsNullOrEmpty(input) && locked)
+            {
+                // Send as text to remote
+                foreach (char c in input)
+                {
+                    SendKey((byte)c, true);
+                    Thread.Sleep(10);
+                    SendKey((byte)c, false);
+                }
+                // Send enter
+                SendKey(13, true);
+                SendKey(13, false);
+            }
         }
         
-        form = new Form();
-        form.Text = "NekoLink - Remote Desktop";
-        form.WindowState = FormWindowState.Maximized;
-        form.KeyPreview = true;
-        form.FormClosing += (s, e) => { Log("Form closing"); };
-        
-        pictureBox = new PictureBox();
-        pictureBox.Dock = DockStyle.Fill;
-        pictureBox.SizeMode = PictureBoxSizeMode.Zoom;
-        pictureBox.MouseMove += (s, e) => { if(keyboardLocked) SendMouse(e.X, e.Y); };
-        pictureBox.MouseClick += (s, e) => { if(keyboardLocked) SendClick(e.X, e.Y, e.Button.ToString()); };
-        pictureBox.Click += (s, e) => { 
-            keyboardLocked = true; 
-            form.Text = "NekoLink - Keyboard LOCKED (Press Right Ctrl to unlock)";
-            Log("Keyboard locked");
-        };
-        
-        form.Controls.Add(pictureBox);
-        
-        form.KeyDown += (s, e) => {
-            if (e.Control && e.KeyCode == Keys.RControlKey)
-            {
-                keyboardLocked = false;
-                form.Text = "NekoLink - Remote Desktop (Unlocked)";
-                Log("Keyboard unlocked");
-            }
-            
-            if (keyboardLocked)
-            {
-                SendKey((byte)e.KeyCode, true);
-            }
-        };
-        
-        form.KeyUp += (s, e) => {
-            if (keyboardLocked)
-            {
-                SendKey((byte)e.KeyCode, false);
-            }
-        };
-        
-        System.Threading.Thread pool = new System.Threading.Thread(ReceiveScreen);
-        pool.Start();
-        Log("Receive thread started");
-        
-        Application.Run(form);
-        Log("Application exiting");
+        client?.Close();
     }
     
-    static bool CheckFirewallRule()
-    {
-        try
-        {
-            Process process = new Process();
-            process.StartInfo.FileName = "netsh";
-            process.StartInfo.Arguments = "advfirewall firewall show rule name=\"NekoLink Client\"";
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.CreateNoWindow = true;
-            process.Start();
-            string output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
-            bool exists = output.Contains("NekoLink Client");
-            Log("Firewall rule exists: " + exists);
-            return exists;
-        }
-        catch (Exception ex)
-        {
-            Log("Firewall check error: " + ex.Message);
-            return false;
-        }
-    }
-    
-    static void Log(string message)
-    {
-        try
-        {
-            log.WriteLine(DateTime.Now.ToString("HH:mm:ss") + " - " + message);
-            log.Flush();
-        }
-        catch { }
-    }
-    
-    static void ReceiveScreen()
+    static void ReceiveLoop()
     {
         int frameCount = 0;
         DateTime lastTime = DateTime.Now;
         
-        while (true)
+        while (connected)
         {
             try
             {
@@ -201,47 +125,46 @@ class NekoLinkClient
                 while (total < len)
                     total += stream.Read(imgData, total, len - total);
                 
-                using (MemoryStream ms = new MemoryStream(imgData))
+                frameCount++;
+                if ((DateTime.Now - lastTime).TotalSeconds >= 1)
                 {
-                    Image img = Image.FromStream(ms);
-                    pictureBox.Invoke((MethodInvoker)delegate { 
-                        if (pictureBox.Image != null)
-                            pictureBox.Image.Dispose();
-                        pictureBox.Image = (Image)img.Clone(); 
-                        
-                        frameCount++;
-                        if ((DateTime.Now - lastTime).TotalSeconds >= 1)
-                        {
-                            form.Text = $"NekoLink - {frameCount} FPS" + (keyboardLocked ? " (LOCKED)" : "");
-                            frameCount = 0;
-                            lastTime = DateTime.Now;
-                        }
-                    });
+                    Console.Title = $"NekoLink - {frameCount} FPS";
+                    frameCount = 0;
+                    lastTime = DateTime.Now;
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                Log("Receive error: " + ex.Message);
                 break;
             }
         }
+        
+        connected = false;
+        Console.WriteLine("Disconnected from server");
+    }
+    
+    static void SendCommand(string cmd)
+    {
+        try
+        {
+            byte[] data = Encoding.ASCII.GetBytes(cmd);
+            stream.Write(data, 0, data.Length);
+        }
+        catch { }
     }
     
     static void SendMouse(int x, int y)
     {
-        string cmd = $"MOUSE,{x},{y}";
-        stream.Write(System.Text.Encoding.ASCII.GetBytes(cmd), 0, cmd.Length);
+        SendCommand($"MOUSE,{x},{y}");
     }
     
     static void SendClick(int x, int y, string button)
     {
-        string cmd = $"CLICK,{x},{y},{button}";
-        stream.Write(System.Text.Encoding.ASCII.GetBytes(cmd), 0, cmd.Length);
+        SendCommand($"CLICK,{x},{y},{button}");
     }
     
     static void SendKey(byte key, bool down)
     {
-        string cmd = $"KEY,{key},{down}";
-        stream.Write(System.Text.Encoding.ASCII.GetBytes(cmd), 0, cmd.Length);
+        SendCommand($"KEY,{key},{down}");
     }
 }
