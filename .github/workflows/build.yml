@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # lets you manually trigger
 
 jobs:
   build:
@@ -13,16 +14,37 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v1
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+    
+    - name: Find csc.exe
+      run: |
+        # Find the Roslyn compiler
+        $vspath = vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+        $cscpath = Join-Path $vspath "MSBuild\Current\Bin\Roslyn"
+        
+        if (Test-Path $cscpath) {
+          echo "CSC_PATH=$cscpath" >> $env:GITHUB_ENV
+          echo "Found csc at: $cscpath"
+        } else {
+          # Fallback path
+          $fallback = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\Roslyn"
+          echo "CSC_PATH=$fallback" >> $env:GITHUB_ENV
+          echo "Using fallback path: $fallback"
+        }
+      shell: pwsh
     
     - name: Build Server
       run: |
-        csc Server.cs /out:NekoLink-Server.exe
+        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe
+        echo "Server build complete"
+      shell: pwsh
     
     - name: Build Client
       run: |
-        csc Client.cs /out:NekoLink-Client.exe /reference:Microsoft.VisualBasic.dll
+        & "$env:CSC_PATH\csc.exe" Client.cs /out:NekoLink-Client.exe /reference:Microsoft.VisualBasic.dll
+        echo "Client build complete"
+      shell: pwsh
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -31,3 +53,10 @@ jobs:
         path: |
           NekoLink-Server.exe
           NekoLink-Client.exe
+        if-no-files-found: error
+    
+    - name: List files (debug)
+      run: |
+        dir
+        echo "Build finished!"
+      shell: pwsh
