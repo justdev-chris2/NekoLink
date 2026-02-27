@@ -1,0 +1,33 @@
+name: Build NekoLink
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1
+    
+    - name: Build Server
+      run: |
+        csc Server.cs /out:NekoLink-Server.exe
+    
+    - name: Build Client
+      run: |
+        csc Client.cs /out:NekoLink-Client.exe
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: NekoLink
+        path: |
+          NekoLink-Server.exe
+          NekoLink-Client.exe
