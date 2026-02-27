@@ -5,6 +5,8 @@ using System.Windows.Forms;
 using System.Net;
 using System.Linq;
 using System.Diagnostics;
+using System.IO;
+using System.Security.Principal;
 
 class NekoLinkClient
 {
@@ -13,14 +15,41 @@ class NekoLinkClient
     static Form form;
     static PictureBox pictureBox;
     static bool keyboardLocked = false;
+    static StreamWriter log;
     
     [STAThread]
     static void Main(string[] args)
     {
-        // Check/add firewall rule
-        if (!IsFirewallRuleExists("NekoLink Client"))
+        // Setup logging
+        log = new StreamWriter("client_debug.txt", true);
+        Log("Client starting...");
+        
+        // Check if running as admin
+        bool isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent())
+            .IsInRole(WindowsBuiltInRole.Administrator);
+        Log("Admin: " + isAdmin);
+        
+        // If not admin and no firewall rule, prompt once
+        if (!isAdmin && !CheckFirewallRule())
         {
-            AddFirewallRule();
+            Log("Requesting admin for firewall...");
+            ProcessStartInfo startInfo = new ProcessStartInfo();
+            startInfo.UseShellExecute = true;
+            startInfo.WorkingDirectory = Environment.CurrentDirectory;
+            startInfo.FileName = Application.ExecutablePath;
+            startInfo.Arguments = string.Join(" ", args);
+            startInfo.Verb = "runas";
+        
+            try
+            {
+                Process.Start(startInfo);
+                Log("Admin instance started, exiting...");
+                return;
+            }
+            catch
+            {
+                Log("User declined admin");
+            }
         }
         
         string serverIp;
@@ -35,6 +64,7 @@ class NekoLinkClient
             if (ips.Count == 0)
             {
                 MessageBox.Show("No network adapters found!");
+                Log("No network adapters");
                 return;
             }
             
@@ -53,14 +83,18 @@ class NekoLinkClient
             serverIp = args[0];
         }
         
+        Log("Attempting to connect to: " + serverIp);
+        
         try
         {
             client = new TcpClient();
             client.Connect(serverIp, 5900);
             stream = client.GetStream();
+            Log("Connected successfully!");
         }
-        catch
+        catch (Exception ex)
         {
+            Log("Connection failed: " + ex.Message);
             MessageBox.Show($"Could not connect to {serverIp}:5900\n\nMake sure server is running and IP is correct.");
             return;
         }
@@ -69,13 +103,18 @@ class NekoLinkClient
         form.Text = "NekoLink - Remote Desktop";
         form.WindowState = FormWindowState.Maximized;
         form.KeyPreview = true;
+        form.FormClosing += (s, e) => { Log("Form closing"); };
         
         pictureBox = new PictureBox();
         pictureBox.Dock = DockStyle.Fill;
         pictureBox.SizeMode = PictureBoxSizeMode.Zoom;
         pictureBox.MouseMove += (s, e) => { if(keyboardLocked) SendMouse(e.X, e.Y); };
         pictureBox.MouseClick += (s, e) => { if(keyboardLocked) SendClick(e.X, e.Y, e.Button.ToString()); };
-        pictureBox.Click += (s, e) => { keyboardLocked = true; form.Text = "NekoLink - Keyboard LOCKED (Press Right Ctrl to unlock)"; };
+        pictureBox.Click += (s, e) => { 
+            keyboardLocked = true; 
+            form.Text = "NekoLink - Keyboard LOCKED (Press Right Ctrl to unlock)";
+            Log("Keyboard locked");
+        };
         
         form.Controls.Add(pictureBox);
         
@@ -84,6 +123,7 @@ class NekoLinkClient
             {
                 keyboardLocked = false;
                 form.Text = "NekoLink - Remote Desktop (Unlocked)";
+                Log("Keyboard unlocked");
             }
             
             if (keyboardLocked)
@@ -101,48 +141,44 @@ class NekoLinkClient
         
         System.Threading.Thread pool = new System.Threading.Thread(ReceiveScreen);
         pool.Start();
+        Log("Receive thread started");
         
         Application.Run(form);
+        Log("Application exiting");
     }
     
-    static bool IsFirewallRuleExists(string ruleName)
+    static bool CheckFirewallRule()
     {
         try
         {
             Process process = new Process();
             process.StartInfo.FileName = "netsh";
-            process.StartInfo.Arguments = "advfirewall firewall show rule name=\"" + ruleName + "\"";
+            process.StartInfo.Arguments = "advfirewall firewall show rule name=\"NekoLink Client\"";
             process.StartInfo.UseShellExecute = false;
             process.StartInfo.RedirectStandardOutput = true;
             process.StartInfo.CreateNoWindow = true;
             process.Start();
             string output = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
-            return output.Contains(ruleName);
+            bool exists = output.Contains("NekoLink Client");
+            Log("Firewall rule exists: " + exists);
+            return exists;
         }
-        catch
+        catch (Exception ex)
         {
+            Log("Firewall check error: " + ex.Message);
             return false;
         }
     }
     
-    static void AddFirewallRule()
+    static void Log(string message)
     {
         try
         {
-            ProcessStartInfo psi = new ProcessStartInfo();
-            psi.FileName = "netsh";
-            psi.Arguments = "advfirewall firewall add rule name=\"NekoLink Client\" dir=out action=allow program=\"" + Application.ExecutablePath + "\" enable=yes";
-            psi.Verb = "runas";
-            psi.UseShellExecute = true;
-            psi.CreateNoWindow = true;
-            
-            Process.Start(psi);
+            log.WriteLine(DateTime.Now.ToString("HH:mm:ss") + " - " + message);
+            log.Flush();
         }
-        catch
-        {
-            // User declined admin or failed
-        }
+        catch { }
     }
     
     static void ReceiveScreen()
@@ -155,7 +191,9 @@ class NekoLinkClient
             try
             {
                 byte[] lenBytes = new byte[4];
-                stream.Read(lenBytes, 0, 4);
+                int read = stream.Read(lenBytes, 0, 4);
+                if (read == 0) break;
+                
                 int len = BitConverter.ToInt32(lenBytes, 0);
                 
                 byte[] imgData = new byte[len];
@@ -163,7 +201,7 @@ class NekoLinkClient
                 while (total < len)
                     total += stream.Read(imgData, total, len - total);
                 
-                using (System.IO.MemoryStream ms = new System.IO.MemoryStream(imgData))
+                using (MemoryStream ms = new MemoryStream(imgData))
                 {
                     Image img = Image.FromStream(ms);
                     pictureBox.Invoke((MethodInvoker)delegate { 
@@ -181,8 +219,9 @@ class NekoLinkClient
                     });
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Log("Receive error: " + ex.Message);
                 break;
             }
         }
