@@ -212,7 +212,7 @@ class NekoLinkServer : Form
                     Log($"Command error: {ex.Message}");
                 }
                 
-                Thread.Sleep(33);
+                Thread.Sleep(16);
             }
             catch (Exception ex)
             {
