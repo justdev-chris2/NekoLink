@@ -55,8 +55,8 @@ control_socket.bind(('', 5903))
 control_socket.listen(5)
 
 print(f"Server IPs: {socket.gethostbyname(socket.gethostname())}")
-print("HTTP stream on port 5900")
-print("Control on port 5901")
+print("HTTP stream on port 5902")
+print("Control on port 5903")
 
 while True:
     conn, addr = control_socket.accept()
