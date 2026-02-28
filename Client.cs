@@ -15,6 +15,10 @@ class NekoLinkClient
     static Label statusLabel;
     static DateTime lastFrame = DateTime.Now;
     static StreamWriter log;
+    static bool fullscreen = false;
+    static FormWindowState prevWindowState;
+    static FormBorderStyle prevBorderStyle;
+    static Panel topPanel;
     
     [STAThread]
     static void Main()
@@ -32,7 +36,9 @@ class NekoLinkClient
         {
             client = new TcpClient();
             client.Connect(ip, 5900);
-            client.ReceiveTimeout = 5000;
+            client.NoDelay = true; // Disable Nagle's algorithm for less latency
+            client.ReceiveBufferSize = 65536;
+            client.SendBufferSize = 65536;
             stream = client.GetStream();
             Log("Connected to server");
         }
@@ -54,7 +60,7 @@ class NekoLinkClient
         };
         
         // Top status panel
-        Panel topPanel = new Panel();
+        topPanel = new Panel();
         topPanel.Height = 30;
         topPanel.Dock = DockStyle.Top;
         topPanel.BackColor = Color.FromArgb(30, 30, 30);
@@ -76,7 +82,7 @@ class NekoLinkClient
         form.Controls.Add(pb);
         form.Controls.Add(topPanel);
         
-        // Mouse events
+        // Mouse events - HIGH FREQUENCY
         pb.MouseMove += (s, e) => {
             if (locked && pb.Image != null)
             {
@@ -84,33 +90,59 @@ class NekoLinkClient
                 float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
                 int remoteX = (int)(e.X * ratioX);
                 int remoteY = (int)(e.Y * ratioY);
+                remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
+                remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
                 SendMouse(remoteX, remoteY);
             }
         };
         
-        pb.MouseClick += (s, e) => {
+        pb.MouseDown += (s, e) => {
             if (locked && pb.Image != null)
             {
                 float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
                 float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
                 int remoteX = (int)(e.X * ratioX);
                 int remoteY = (int)(e.Y * ratioY);
-                SendClick(remoteX, remoteY, e.Button.ToString());
-                Log($"Click sent: {remoteX},{remoteY} {e.Button}");
+                remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
+                remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
+                
+                if (e.Button == MouseButtons.Left)
+                    SendClickDown(remoteX, remoteY, "Left");
+                else if (e.Button == MouseButtons.Right)
+                    SendClickDown(remoteX, remoteY, "Right");
+            }
+        };
+        
+        pb.MouseUp += (s, e) => {
+            if (locked && pb.Image != null)
+            {
+                if (e.Button == MouseButtons.Left)
+                    SendClickUp("Left");
+                else if (e.Button == MouseButtons.Right)
+                    SendClickUp("Right");
             }
         };
         
         // Click to lock
         pb.Click += (s, e) => {
             locked = true;
-            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl to unlock";
+            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl or F11 to unlock";
             statusLabel.ForeColor = Color.LightGreen;
             form.Text = "NekoLink [LOCKED]";
             Log("Locked by click");
         };
         
+        // Double-click to fullscreen
+        pb.DoubleClick += (s, e) => ToggleFullscreen();
+        
         // Keyboard events
         form.KeyDown += (s, e) => {
+            if (e.KeyCode == Keys.F11)
+            {
+                ToggleFullscreen();
+                e.Handled = true;
+            }
+            
             if (e.Control && e.KeyCode == Keys.RControlKey)
             {
                 locked = false;
@@ -120,7 +152,7 @@ class NekoLinkClient
                 Log("Unlocked by Right Ctrl");
             }
             
-            if (locked && !e.Control && e.KeyCode != Keys.RControlKey)
+            if (locked && !e.Control && e.KeyCode != Keys.RControlKey && e.KeyCode != Keys.F11)
             {
                 SendKey((byte)e.KeyCode, true);
                 Log($"Key down: {e.KeyCode}");
@@ -128,16 +160,17 @@ class NekoLinkClient
         };
         
         form.KeyUp += (s, e) => {
-            if (locked && !e.Control)
+            if (locked && !e.Control && e.KeyCode != Keys.RControlKey)
             {
                 SendKey((byte)e.KeyCode, false);
                 Log($"Key up: {e.KeyCode}");
             }
         };
         
-        // Start receive thread
+        // Start receive thread with higher priority
         Thread receiveThread = new Thread(ReceiveScreen);
         receiveThread.IsBackground = true;
+        receiveThread.Priority = ThreadPriority.AboveNormal;
         receiveThread.Start();
         
         // Timeout check thread
@@ -145,10 +178,10 @@ class NekoLinkClient
             while (true)
             {
                 Thread.Sleep(1000);
-                if ((DateTime.Now - lastFrame).TotalSeconds > 10)
+                if ((DateTime.Now - lastFrame).TotalSeconds > 5)
                 {
                     pb.Invoke((MethodInvoker)(() => {
-                        Log("Server timeout - no frames for 10 seconds");
+                        Log("Server timeout - no frames for 5 seconds");
                         MessageBox.Show("Server stopped responding");
                         Application.Exit();
                     }));
@@ -163,6 +196,33 @@ class NekoLinkClient
         Application.Run(form);
     }
     
+    static void ToggleFullscreen()
+    {
+        fullscreen = !fullscreen;
+        
+        if (fullscreen)
+        {
+            prevWindowState = form.WindowState;
+            prevBorderStyle = form.FormBorderStyle;
+            
+            form.FormBorderStyle = FormBorderStyle.None;
+            form.WindowState = FormWindowState.Normal;
+            form.Bounds = Screen.PrimaryScreen.Bounds;
+            topPanel.Visible = false;
+            
+            pb.SizeMode = PictureBoxSizeMode.Zoom;
+        }
+        else
+        {
+            form.FormBorderStyle = prevBorderStyle;
+            form.WindowState = prevWindowState;
+            topPanel.Visible = true;
+            pb.SizeMode = PictureBoxSizeMode.Zoom;
+        }
+        
+        Log($"Fullscreen: {fullscreen}");
+    }
+    
     static void ReceiveScreen()
     {
         byte[] lenBytes = new byte[4];
@@ -174,29 +234,22 @@ class NekoLinkClient
         {
             try
             {
-                // Check if connection is dead
-                if (client.Client.Poll(1000, SelectMode.SelectRead) && client.Client.Available == 0)
+                // Read length with timeout
+                int read = 0;
+                int timeout = 0;
+                while (read < 4 && timeout < 50)
                 {
-                    Log("Connection detected as dead");
-                    pb.Invoke((MethodInvoker)(() => {
-                        MessageBox.Show("Connection to server lost");
-                        Application.Exit();
-                    }));
-                    break;
-                }
-                
-                int read = stream.Read(lenBytes, 0, 4);
-                if (read == 0)
-                {
-                    Log("Connection closed by server");
-                    break;
+                    int bytes = stream.Read(lenBytes, read, 4 - read);
+                    if (bytes == 0) throw new Exception("Connection closed");
+                    read += bytes;
+                    timeout++;
                 }
                 
                 int len = BitConverter.ToInt32(lenBytes, 0);
                 if (len <= 0 || len > 10 * 1024 * 1024)
                 {
                     Log($"Invalid length: {len}");
-                    break;
+                    continue;
                 }
                 
                 byte[] imgData = new byte[len];
@@ -221,9 +274,9 @@ class NekoLinkClient
                 failedReads = 0;
                 frameCount++;
                 
-                if ((DateTime.Now - lastLog).TotalSeconds >= 10)
+                if ((DateTime.Now - lastLog).TotalSeconds >= 5)
                 {
-                    Log($"Receiving ~{frameCount/10}fps");
+                    Log($"Receiving ~{frameCount/5}fps");
                     frameCount = 0;
                     lastLog = DateTime.Now;
                 }
@@ -232,7 +285,7 @@ class NekoLinkClient
             {
                 Log($"Receive error: {ex.Message}");
                 failedReads++;
-                if (failedReads > 5)
+                if (failedReads > 3)
                 {
                     pb.Invoke((MethodInvoker)(() => {
                         MessageBox.Show("Connection to server lost");
@@ -240,7 +293,7 @@ class NekoLinkClient
                     }));
                     break;
                 }
-                Thread.Sleep(100);
+                Thread.Sleep(50);
             }
         }
     }
@@ -263,9 +316,14 @@ class NekoLinkClient
         SendCommand($"MOUSE,{x},{y}");
     }
     
-    static void SendClick(int x, int y, string button)
+    static void SendClickDown(int x, int y, string button)
     {
-        SendCommand($"CLICK,{x},{y},{button}");
+        SendCommand($"CLICKDOWN,{x},{y},{button}");
+    }
+    
+    static void SendClickUp(string button)
+    {
+        SendCommand($"CLICKUP,{button}");
     }
     
     static void SendKey(byte key, bool down)
