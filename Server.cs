@@ -30,7 +30,12 @@ class NekoLinkServer : Form
         // Setup tray
         trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("Show IPs", null, (s, e) => ShowIPs());
-        trayMenu.Items.Add("Exit", null, (s, e) => { running = false; Application.Exit(); });
+        trayMenu.Items.Add("Exit", null, (s, e) => { 
+            running = false; 
+            trayIcon.Visible = false;
+            Application.Exit(); 
+            Environment.Exit(0);
+        });
         
         trayIcon = new NotifyIcon();
         trayIcon.Text = "NekoLink Server";
@@ -38,6 +43,11 @@ class NekoLinkServer : Form
         trayIcon.ContextMenuStrip = trayMenu;
         trayIcon.Visible = true;
         trayIcon.ShowBalloonTip(1000, "NekoLink", "Server running in background", ToolTipIcon.Info);
+        
+        Application.ApplicationExit += (s, e) => {
+            running = false;
+            trayIcon?.Dispose();
+        };
         
         Application.Run();
     }
@@ -67,7 +77,7 @@ class NekoLinkServer : Form
         var encoderParams = new EncoderParameters(1);
         encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 70L);
         
-        while (client.Connected)
+        while (client.Connected && running)
         {
             try
             {
@@ -91,40 +101,48 @@ class NekoLinkServer : Form
                 {
                     byte[] cmdBuffer = new byte[1024];
                     int read = stream.Read(cmdBuffer, 0, cmdBuffer.Length);
-                    string cmd = System.Text.Encoding.ASCII.GetString(cmdBuffer, 0, read);
-                    string[] parts = cmd.Split(',');
-                    
-                    if (parts[0] == "MOUSE" && parts.Length >= 3)
+                    if (read > 0)
                     {
-                        Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
-                    }
-                    else if (parts[0] == "CLICK" && parts.Length >= 4)
-                    {
-                        Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
-                        if (parts[3].Contains("Left"))
+                        string cmd = System.Text.Encoding.ASCII.GetString(cmdBuffer, 0, read);
+                        string[] parts = cmd.Split(',');
+                        
+                        if (parts[0] == "MOUSE" && parts.Length >= 3)
                         {
-                            mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
-                            Thread.Sleep(50);
-                            mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                            Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
                         }
-                        else if (parts[3].Contains("Right"))
+                        else if (parts[0] == "CLICK" && parts.Length >= 4)
                         {
-                            mouse_event(0x08, 0, 0, 0, UIntPtr.Zero);
-                            Thread.Sleep(50);
-                            mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
+                            Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
+                            if (parts[3].Contains("Left"))
+                            {
+                                mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
+                                Thread.Sleep(50);
+                                mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                            }
+                            else if (parts[3].Contains("Right"))
+                            {
+                                mouse_event(0x08, 0, 0, 0, UIntPtr.Zero);
+                                Thread.Sleep(50);
+                                mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
+                            }
                         }
-                    }
-                    else if (parts[0] == "KEY" && parts.Length >= 3)
-                    {
-                        uint flags = parts[2] == "True" ? 0u : 2u;
-                        keybd_event(byte.Parse(parts[1]), 0, flags, UIntPtr.Zero);
+                        else if (parts[0] == "KEY" && parts.Length >= 3)
+                        {
+                            uint flags = parts[2] == "True" ? 0u : 2u;
+                            keybd_event(byte.Parse(parts[1]), 0, flags, UIntPtr.Zero);
+                        }
                     }
                 }
                 
-                Thread.Sleep(33);
+                Thread.Sleep(33); // ~30fps
             }
-            catch { break; }
+            catch
+            {
+                break;
+            }
         }
+        
+        client.Close();
     }
     
     static void ShowIPs()
