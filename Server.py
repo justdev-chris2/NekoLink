@@ -46,12 +46,12 @@ def handle_control(conn):
     conn.close()
 
 # Start HTTP server
-httpd = socketserver.ThreadingTCPServer(('', 5900), StreamingHandler)
+httpd = socketserver.ThreadingTCPServer(('', 5902), StreamingHandler)
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
 # Start control server
 control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-control_socket.bind(('', 5901))
+control_socket.bind(('', 5903))
 control_socket.listen(5)
 
 print(f"Server IPs: {socket.gethostbyname(socket.gethostname())}")
