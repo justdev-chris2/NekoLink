@@ -20,6 +20,10 @@ class NekoLinkClient
     static FormBorderStyle prevBorderStyle;
     static Panel topPanel;
     
+    // Mouse throttling
+    static DateTime lastMouseSend = DateTime.Now;
+    static int lastX = -1, lastY = -1;
+    
     [STAThread]
     static void Main()
     {
@@ -36,7 +40,7 @@ class NekoLinkClient
         {
             client = new TcpClient();
             client.Connect(ip, 5900);
-            client.NoDelay = true; // Disable Nagle's algorithm for less latency
+            client.NoDelay = true;
             client.ReceiveBufferSize = 65536;
             client.SendBufferSize = 65536;
             stream = client.GetStream();
@@ -82,51 +86,61 @@ class NekoLinkClient
         form.Controls.Add(pb);
         form.Controls.Add(topPanel);
         
-        // Mouse events - HIGH FREQUENCY
+        // Mouse events - THROTTLED
         pb.MouseMove += (s, e) => {
-            if (locked && pb.Image != null)
-            {
-                float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
-                float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
-                int remoteX = (int)(e.X * ratioX);
-                int remoteY = (int)(e.Y * ratioY);
-                remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
-                remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
-                SendMouse(remoteX, remoteY);
-            }
+            if (!locked || pb.Image == null) return;
+            
+            // Throttle to 30 updates per second
+            if ((DateTime.Now - lastMouseSend).TotalMilliseconds < 33)
+                return;
+            
+            float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
+            float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
+            int remoteX = (int)(e.X * ratioX);
+            int remoteY = (int)(e.Y * ratioY);
+            
+            // Skip tiny movements
+            if (Math.Abs(remoteX - lastX) < 5 && Math.Abs(remoteY - lastY) < 5)
+                return;
+            
+            remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
+            remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
+            
+            SendMouse(remoteX, remoteY);
+            lastMouseSend = DateTime.Now;
+            lastX = remoteX;
+            lastY = remoteY;
         };
         
         pb.MouseDown += (s, e) => {
-            if (locked && pb.Image != null)
-            {
-                float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
-                float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
-                int remoteX = (int)(e.X * ratioX);
-                int remoteY = (int)(e.Y * ratioY);
-                remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
-                remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
-                
-                if (e.Button == MouseButtons.Left)
-                    SendClickDown(remoteX, remoteY, "Left");
-                else if (e.Button == MouseButtons.Right)
-                    SendClickDown(remoteX, remoteY, "Right");
-            }
+            if (!locked || pb.Image == null) return;
+            
+            float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
+            float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
+            int remoteX = (int)(e.X * ratioX);
+            int remoteY = (int)(e.Y * ratioY);
+            remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
+            remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
+            
+            if (e.Button == MouseButtons.Left)
+                SendClickDown(remoteX, remoteY, "Left");
+            else if (e.Button == MouseButtons.Right)
+                SendClickDown(remoteX, remoteY, "Right");
         };
         
         pb.MouseUp += (s, e) => {
-            if (locked && pb.Image != null)
-            {
-                if (e.Button == MouseButtons.Left)
-                    SendClickUp("Left");
-                else if (e.Button == MouseButtons.Right)
-                    SendClickUp("Right");
-            }
+            if (!locked) return;
+            
+            if (e.Button == MouseButtons.Left)
+                SendClickUp("Left");
+            else if (e.Button == MouseButtons.Right)
+                SendClickUp("Right");
         };
         
         // Click to lock
         pb.Click += (s, e) => {
             locked = true;
-            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl or F11 to unlock";
+            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl to unlock";
             statusLabel.ForeColor = Color.LightGreen;
             form.Text = "NekoLink [LOCKED]";
             Log("Locked by click");
@@ -167,7 +181,7 @@ class NekoLinkClient
             }
         };
         
-        // Start receive thread with higher priority
+        // Start receive thread
         Thread receiveThread = new Thread(ReceiveScreen);
         receiveThread.IsBackground = true;
         receiveThread.Priority = ThreadPriority.AboveNormal;
@@ -209,15 +223,12 @@ class NekoLinkClient
             form.WindowState = FormWindowState.Normal;
             form.Bounds = Screen.PrimaryScreen.Bounds;
             topPanel.Visible = false;
-            
-            pb.SizeMode = PictureBoxSizeMode.Zoom;
         }
         else
         {
             form.FormBorderStyle = prevBorderStyle;
             form.WindowState = prevWindowState;
             topPanel.Visible = true;
-            pb.SizeMode = PictureBoxSizeMode.Zoom;
         }
         
         Log($"Fullscreen: {fullscreen}");
@@ -236,13 +247,11 @@ class NekoLinkClient
             {
                 // Read length with timeout
                 int read = 0;
-                int timeout = 0;
-                while (read < 4 && timeout < 50)
+                while (read < 4)
                 {
                     int bytes = stream.Read(lenBytes, read, 4 - read);
                     if (bytes == 0) throw new Exception("Connection closed");
                     read += bytes;
-                    timeout++;
                 }
                 
                 int len = BitConverter.ToInt32(lenBytes, 0);
