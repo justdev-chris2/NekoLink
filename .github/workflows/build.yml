@@ -1,30 +1,43 @@
-name: Build NekoLink Python
+name: Build NekoLink
 
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      
-      - name: Install deps
-        run: |
-          pip install pyautogui Pillow requests keyboard
-          pip install pyinstaller
-      
-      - name: Build Server
-        run: pyinstaller --onefile --noconsole Server.py --name NekoLink-Server
-      
-      - name: Build Client
-        run: pyinstaller --onefile --noconsole Client.py --name NekoLink-Client
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: NekoLink
-          path: dist/*.exe
+    - uses: actions/checkout@v4
+    
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+    
+    - name: Find csc.exe
+      run: |
+        $vspath = vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+        $cscpath = Join-Path $vspath "MSBuild\Current\Bin\Roslyn"
+        echo "CSC_PATH=$cscpath" >> $env:GITHUB_ENV
+      shell: pwsh
+    
+    - name: Build Server
+      run: |
+        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe /target:winexe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
+      shell: pwsh
+    
+    - name: Build Client
+      run: |
+        & "$env:CSC_PATH\csc.exe" Client.cs /out:NekoLink-Client.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:Microsoft.VisualBasic.dll
+      shell: pwsh
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: NekoLink
+        path: |
+          NekoLink-Server.exe
+          NekoLink-Client.exe
