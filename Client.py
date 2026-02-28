@@ -14,7 +14,7 @@ class NekoLinkClient:
         self.server_ip = server_ip
         self.locked = False
         self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.control_socket.connect((server_ip, 5901))
+        self.control_socket.connect((server_ip, 5903))
         
         self.window = tk.Tk()
         self.window.title(f"NekoLink - {server_ip}")
@@ -60,7 +60,7 @@ class NekoLinkClient:
             pass
             
     def video_stream(self):
-        stream = requests.get(f'http://{self.server_ip}:5900', stream=True)
+        stream = requests.get(f'http://{self.server_ip}:5902', stream=True)
         bytes_data = b''
         for chunk in stream.iter_content(chunk_size=1024):
             bytes_data += chunk
