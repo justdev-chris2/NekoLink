@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Sockets;
 using System.Windows.Forms;
@@ -14,6 +13,7 @@ class NekoLinkClient
     static Form form;
     static bool locked = false;
     static Label statusLabel;
+    static DateTime lastFrame = DateTime.Now;
     
     [STAThread]
     static void Main()
@@ -25,6 +25,7 @@ class NekoLinkClient
         {
             client = new TcpClient();
             client.Connect(ip, 5900);
+            client.ReceiveTimeout = 5000;
             stream = client.GetStream();
         }
         catch
@@ -38,6 +39,7 @@ class NekoLinkClient
         form.WindowState = FormWindowState.Maximized;
         form.KeyPreview = true;
         form.BackColor = Color.Black;
+        form.FormClosing += (s, e) => Environment.Exit(0);
         
         // Top status panel
         Panel topPanel = new Panel();
@@ -50,6 +52,7 @@ class NekoLinkClient
         statusLabel.ForeColor = Color.White;
         statusLabel.Dock = DockStyle.Fill;
         statusLabel.TextAlign = ContentAlignment.MiddleCenter;
+        statusLabel.Font = new Font("Arial", 10, FontStyle.Bold);
         topPanel.Controls.Add(statusLabel);
         
         // Picture box for remote screen
@@ -63,7 +66,7 @@ class NekoLinkClient
         
         // Mouse events
         pb.MouseMove += (s, e) => {
-            if (locked)
+            if (locked && pb.Image != null)
             {
                 float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
                 float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
@@ -74,7 +77,7 @@ class NekoLinkClient
         };
         
         pb.MouseClick += (s, e) => {
-            if (locked)
+            if (locked && pb.Image != null)
             {
                 float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
                 float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
@@ -102,14 +105,14 @@ class NekoLinkClient
                 form.Text = "NekoLink";
             }
             
-            if (locked && !e.Control)
+            if (locked && !e.Control && e.KeyCode != Keys.RControlKey)
             {
                 SendKey((byte)e.KeyCode, true);
             }
         };
         
         form.KeyUp += (s, e) => {
-            if (locked)
+            if (locked && !e.Control)
             {
                 SendKey((byte)e.KeyCode, false);
             }
@@ -117,7 +120,26 @@ class NekoLinkClient
         
         // Start receive thread
         Thread receiveThread = new Thread(ReceiveScreen);
+        receiveThread.IsBackground = true;
         receiveThread.Start();
+        
+        // Timeout check thread
+        Thread timeoutThread = new Thread(() => {
+            while (true)
+            {
+                Thread.Sleep(1000);
+                if ((DateTime.Now - lastFrame).TotalSeconds > 5)
+                {
+                    pb.Invoke((MethodInvoker)(() => {
+                        MessageBox.Show("Server stopped responding");
+                        Application.Exit();
+                    }));
+                    break;
+                }
+            }
+        });
+        timeoutThread.IsBackground = true;
+        timeoutThread.Start();
         
         Application.Run(form);
     }
@@ -125,18 +147,36 @@ class NekoLinkClient
     static void ReceiveScreen()
     {
         byte[] lenBytes = new byte[4];
+        int failedReads = 0;
         
         while (true)
         {
             try
             {
-                stream.Read(lenBytes, 0, 4);
+                // Check if connection is dead
+                if (client.Client.Poll(1000, SelectMode.SelectRead) && client.Client.Available == 0)
+                {
+                    pb.Invoke((MethodInvoker)(() => {
+                        MessageBox.Show("Connection to server lost");
+                        Application.Exit();
+                    }));
+                    break;
+                }
+                
+                int read = stream.Read(lenBytes, 0, 4);
+                if (read == 0) break;
+                
                 int len = BitConverter.ToInt32(lenBytes, 0);
+                if (len <= 0 || len > 10 * 1024 * 1024) break; // Sanity check
                 
                 byte[] imgData = new byte[len];
-                int read = 0;
-                while (read < len)
-                    read += stream.Read(imgData, read, len - read);
+                int total = 0;
+                while (total < len)
+                {
+                    int bytesRead = stream.Read(imgData, total, len - total);
+                    if (bytesRead == 0) throw new Exception("Connection lost");
+                    total += bytesRead;
+                }
                 
                 using (MemoryStream ms = new MemoryStream(imgData))
                 {
@@ -146,10 +186,22 @@ class NekoLinkClient
                         pb.Image = (Image)img.Clone();
                     }));
                 }
+                
+                lastFrame = DateTime.Now;
+                failedReads = 0;
             }
             catch
             {
-                break;
+                failedReads++;
+                if (failedReads > 5)
+                {
+                    pb.Invoke((MethodInvoker)(() => {
+                        MessageBox.Show("Connection to server lost");
+                        Application.Exit();
+                    }));
+                    break;
+                }
+                Thread.Sleep(100);
             }
         }
     }
