@@ -1,0 +1,4 @@
+pyautogui
+Pillow
+requests
+keyboard
