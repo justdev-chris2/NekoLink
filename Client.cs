@@ -1,7 +1,7 @@
 static WebSocket ws;
 static void ConnectToRelay()
 {
-    ws = new WebSocket("ws://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev/");
+    ws = new WebSocket("ws://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev");
     
     // Register as viewer
     ws.Send(JsonConvert.SerializeObject(new { 
