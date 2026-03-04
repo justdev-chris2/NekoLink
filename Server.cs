@@ -73,7 +73,10 @@ class NekoLinkServer
             running = false;
             trayIcon?.Dispose();
             log?.Close();
-            ws?.CloseAsync();
+            if (ws != null && ws.State == WebSocketState.Open)
+            {
+                try { ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None).Wait(); } catch { }
+            }
         };
         
         Log("Server initialized");
@@ -109,7 +112,7 @@ class NekoLinkServer
     {
         byte[] buffer = new byte[4096];
         
-        while (ws.State == WebSocketState.Open && running)
+        while (ws != null && ws.State == WebSocketState.Open && running)
         {
             try
             {
@@ -125,9 +128,11 @@ class NekoLinkServer
                     {
                         int cmdStart = message.IndexOf("\"command\":\"") + 11;
                         int cmdEnd = message.IndexOf("\"", cmdStart);
-                        string command = message.Substring(cmdStart, cmdEnd - cmdStart);
-                        
-                        ProcessCommand(command);
+                        if (cmdStart > 10 && cmdEnd > cmdStart)
+                        {
+                            string command = message.Substring(cmdStart, cmdEnd - cmdStart);
+                            ProcessCommand(command);
+                        }
                     }
                 }
             }
@@ -188,11 +193,22 @@ class NekoLinkServer
         }
     }
     
-    static async void CaptureAndSend()
+    static void CaptureAndSend()
     {
-        var jpegCodec = GetEncoder(ImageFormat.Jpeg);
+        // Get encoder with fully qualified name to avoid ambiguity
+        System.Drawing.Imaging.Encoder jpegEncoder = System.Drawing.Imaging.Encoder.Quality;
         var encoderParams = new EncoderParameters(1);
-        encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 70L);
+        encoderParams.Param[0] = new EncoderParameter(jpegEncoder, 70L);
+        
+        ImageCodecInfo jpegCodec = null;
+        foreach (ImageCodecInfo codec in ImageCodecInfo.GetImageEncoders())
+        {
+            if (codec.FormatID == ImageFormat.Jpeg.Guid)
+            {
+                jpegCodec = codec;
+                break;
+            }
+        }
         
         int frameCount = 0;
         DateTime lastLog = DateTime.Now;
@@ -201,7 +217,7 @@ class NekoLinkServer
         {
             try
             {
-                if (ws?.State != WebSocketState.Open || !hostRegistered)
+                if (ws == null || ws.State != WebSocketState.Open || !hostRegistered)
                 {
                     Thread.Sleep(1000);
                     continue;
@@ -222,7 +238,7 @@ class NekoLinkServer
                         string frameJson = $"{{\"type\":\"frame\",\"data\":\"{base64}\"}}";
                         
                         byte[] sendData = Encoding.UTF8.GetBytes(frameJson);
-                        await ws.SendAsync(new ArraySegment<byte>(sendData), WebSocketMessageType.Text, true, CancellationToken.None);
+                        ws.SendAsync(new ArraySegment<byte>(sendData), WebSocketMessageType.Text, true, CancellationToken.None).Wait();
                         
                         frameCount++;
                         if ((DateTime.Now - lastLog).TotalSeconds >= 10)
@@ -276,14 +292,6 @@ class NekoLinkServer
             }
         }
         catch { }
-    }
-    
-    static ImageCodecInfo GetEncoder(ImageFormat format)
-    {
-        foreach (ImageCodecInfo codec in ImageCodecInfo.GetImageEncoders())
-            if (codec.FormatID == format.Guid)
-                return codec;
-        return null;
     }
     
     [System.Runtime.InteropServices.DllImport("user32.dll")]
