@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text;
@@ -7,165 +8,76 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-class NekoLinkClient
+class NekoLinkServer
 {
     static ClientWebSocket ws;
-    static PictureBox pb;
-    static Form form;
-    static bool locked = false;
-    static Label statusLabel;
-    static DateTime lastFrame = DateTime.Now;
+    static NotifyIcon trayIcon;
+    static ContextMenuStrip trayMenu;
+    static bool running = true;
     static StreamWriter log;
-    static bool fullscreen = false;
-    static FormWindowState prevWindowState;
-    static FormBorderStyle prevBorderStyle;
-    static Panel topPanel;
-    
-    // Mouse throttling
-    static DateTime lastMouseSend = DateTime.Now;
-    static int lastX = -1, lastY = -1;
+    static bool hostRegistered = false;
     
     [STAThread]
     static void Main()
     {
-        // Setup logging
-        log = new StreamWriter("client_debug.txt", true);
-        Log("Client starting...");
+        // Force create log file immediately
+        try
+        {
+            log = new StreamWriter("server_debug.txt", true);
+            log.WriteLine($"{DateTime.Now:HH:mm:ss} - SERVER INITIALIZING");
+            log.Flush();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to create log: {ex.Message}");
+            return;
+        }
         
-        // Relay server URL (your Codespaces URL)
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        
+        // Hide console
+        var handle = GetConsoleWindow();
+        ShowWindow(handle, 0);
+        
+        Log("Server starting...");
+        
+        // Connect to relay
         string relayUrl = "ws://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev";
-        
         ConnectToRelay(relayUrl).Wait();
         
-        form = new Form();
-        form.Text = "NekoLink - Relay Mode";
-        form.WindowState = FormWindowState.Maximized;
-        form.KeyPreview = true;
-        form.BackColor = Color.Black;
-        form.FormClosing += (s, e) => {
-            Log("Form closing");
+        // Start screen capture thread
+        Thread captureThread = new Thread(CaptureAndSend);
+        captureThread.Start();
+        
+        // Setup tray
+        trayMenu = new ContextMenuStrip();
+        trayMenu.Items.Add("Show Debug", null, (s, e) => ShowDebug());
+        trayMenu.Items.Add("Exit", null, (s, e) => { 
+            Log("Exit clicked");
+            running = false; 
+            trayIcon.Visible = false;
+            Application.Exit(); 
+            Environment.Exit(0);
+        });
+        
+        trayIcon = new NotifyIcon();
+        trayIcon.Text = "NekoLink Server (Relay)";
+        trayIcon.Icon = SystemIcons.Application;
+        trayIcon.ContextMenuStrip = trayMenu;
+        trayIcon.Visible = true;
+        trayIcon.ShowBalloonTip(1000, "NekoLink", "Connected to relay", ToolTipIcon.Info);
+        
+        Application.ApplicationExit += (s, e) => {
+            Log("Application exiting");
+            running = false;
+            trayIcon?.Dispose();
             log?.Close();
             ws?.CloseAsync();
         };
         
-        // Top status panel
-        topPanel = new Panel();
-        topPanel.Height = 30;
-        topPanel.Dock = DockStyle.Top;
-        topPanel.BackColor = Color.FromArgb(30, 30, 30);
-        
-        statusLabel = new Label();
-        statusLabel.Text = "🔓 Unlocked - Click screen to lock";
-        statusLabel.ForeColor = Color.White;
-        statusLabel.Dock = DockStyle.Fill;
-        statusLabel.TextAlign = ContentAlignment.MiddleCenter;
-        statusLabel.Font = new Font("Arial", 10, FontStyle.Bold);
-        topPanel.Controls.Add(statusLabel);
-        
-        // Picture box for remote screen
-        pb = new PictureBox();
-        pb.Dock = DockStyle.Fill;
-        pb.SizeMode = PictureBoxSizeMode.Zoom;
-        pb.BackColor = Color.Black;
-        
-        form.Controls.Add(pb);
-        form.Controls.Add(topPanel);
-        
-        // Mouse events - THROTTLED
-        pb.MouseMove += (s, e) => {
-            if (!locked || pb.Image == null) return;
-            
-            // Throttle to 30 updates per second
-            if ((DateTime.Now - lastMouseSend).TotalMilliseconds < 33)
-                return;
-            
-            float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
-            float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
-            int remoteX = (int)(e.X * ratioX);
-            int remoteY = (int)(e.Y * ratioY);
-            
-            // Skip tiny movements
-            if (Math.Abs(remoteX - lastX) < 5 && Math.Abs(remoteY - lastY) < 5)
-                return;
-            
-            remoteX = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, remoteX));
-            remoteY = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, remoteY));
-            
-            SendCommand($"MOUSE,{remoteX},{remoteY}");
-            lastMouseSend = DateTime.Now;
-            lastX = remoteX;
-            lastY = remoteY;
-        };
-        
-        pb.MouseDown += (s, e) => {
-            if (!locked || pb.Image == null) return;
-            
-            float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
-            float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
-            int remoteX = (int)(e.X * ratioX);
-            int remoteY = (int)(e.Y * ratioY);
-            
-            if (e.Button == MouseButtons.Left)
-                SendCommand($"CLICKDOWN,{remoteX},{remoteY},Left");
-            else if (e.Button == MouseButtons.Right)
-                SendCommand($"CLICKDOWN,{remoteX},{remoteY},Right");
-        };
-        
-        pb.MouseUp += (s, e) => {
-            if (!locked) return;
-            
-            if (e.Button == MouseButtons.Left)
-                SendCommand("CLICKUP,Left");
-            else if (e.Button == MouseButtons.Right)
-                SendCommand("CLICKUP,Right");
-        };
-        
-        // Click to lock
-        pb.Click += (s, e) => {
-            locked = true;
-            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl to unlock";
-            statusLabel.ForeColor = Color.LightGreen;
-            form.Text = "NekoLink [LOCKED]";
-            Log("Locked by click");
-        };
-        
-        // Double-click to fullscreen
-        pb.DoubleClick += (s, e) => ToggleFullscreen();
-        
-        // Keyboard events
-        form.KeyDown += (s, e) => {
-            if (e.KeyCode == Keys.F11)
-            {
-                ToggleFullscreen();
-                e.Handled = true;
-            }
-            
-            if (e.Control && e.KeyCode == Keys.RControlKey)
-            {
-                locked = false;
-                statusLabel.Text = "🔓 Unlocked - Click screen to lock";
-                statusLabel.ForeColor = Color.White;
-                form.Text = "NekoLink";
-                Log("Unlocked by Right Ctrl");
-            }
-            
-            if (locked && !e.Control && e.KeyCode != Keys.RControlKey && e.KeyCode != Keys.F11)
-            {
-                SendCommand($"KEY,{(byte)e.KeyCode},True");
-                Log($"Key down: {e.KeyCode}");
-            }
-        };
-        
-        form.KeyUp += (s, e) => {
-            if (locked && !e.Control && e.KeyCode != Keys.RControlKey)
-            {
-                SendCommand($"KEY,{(byte)e.KeyCode},False");
-                Log($"Key up: {e.KeyCode}");
-            }
-        };
-        
-        Log("Application started");
-        Application.Run(form);
+        Log("Server initialized");
+        Application.Run();
     }
     
     static async Task ConnectToRelay(string relayUrl)
@@ -176,17 +88,18 @@ class NekoLinkClient
             await ws.ConnectAsync(new Uri(relayUrl), CancellationToken.None);
             Log($"Connected to relay: {relayUrl}");
             
-            // Register as viewer
-            string registerMsg = "{\"type\":\"register\",\"role\":\"viewer\"}";
+            // Register as host
+            string registerMsg = "{\"type\":\"register\",\"role\":\"host\"}";
             byte[] regBytes = Encoding.UTF8.GetBytes(registerMsg);
             await ws.SendAsync(new ArraySegment<byte>(regBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            hostRegistered = true;
             
-            // Start receiving messages
+            // Start receiving messages (for control commands)
             _ = Task.Run(ReceiveMessages);
         }
         catch (Exception ex)
         {
-            Log($"Connection error: {ex.Message}");
+            Log($"Relay connection error: {ex.Message}");
             MessageBox.Show($"Failed to connect to relay: {ex.Message}");
             Environment.Exit(1);
         }
@@ -194,9 +107,9 @@ class NekoLinkClient
     
     static async Task ReceiveMessages()
     {
-        byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
+        byte[] buffer = new byte[4096];
         
-        while (ws.State == WebSocketState.Open)
+        while (ws.State == WebSocketState.Open && running)
         {
             try
             {
@@ -205,27 +118,16 @@ class NekoLinkClient
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
                     string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    Log($"Received: {message}");
                     
-                    // Parse JSON (simplified - for production use Newtonsoft.Json)
-                    if (message.Contains("\"type\":\"frame\""))
+                    // Parse control commands
+                    if (message.Contains("\"type\":\"control\""))
                     {
-                        // Extract base64 data (quick and dirty)
-                        int dataStart = message.IndexOf("\"data\":\"") + 8;
-                        int dataEnd = message.LastIndexOf("\"");
-                        string base64Data = message.Substring(dataStart, dataEnd - dataStart);
+                        int cmdStart = message.IndexOf("\"command\":\"") + 11;
+                        int cmdEnd = message.IndexOf("\"", cmdStart);
+                        string command = message.Substring(cmdStart, cmdEnd - cmdStart);
                         
-                        byte[] imgData = Convert.FromBase64String(base64Data);
-                        
-                        using (MemoryStream ms = new MemoryStream(imgData))
-                        {
-                            Image img = Image.FromStream(ms);
-                            pb.Invoke((MethodInvoker)(() => {
-                                pb.Image?.Dispose();
-                                pb.Image = (Image)img.Clone();
-                            }));
-                        }
-                        
-                        lastFrame = DateTime.Now;
+                        ProcessCommand(command);
                     }
                 }
             }
@@ -239,45 +141,126 @@ class NekoLinkClient
         Log("Disconnected from relay");
     }
     
-    static void SendCommand(string cmd)
+    static void ProcessCommand(string command)
     {
         try
         {
-            if (ws?.State == WebSocketState.Open)
+            Log($"Processing command: {command}");
+            string[] parts = command.Split(',');
+            
+            if (parts[0] == "MOUSE" && parts.Length >= 3)
             {
-                string jsonCmd = $"{{\"type\":\"control\",\"command\":\"{cmd}\"}}";
-                byte[] data = Encoding.UTF8.GetBytes(jsonCmd);
-                ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Text, true, CancellationToken.None).Wait();
+                if (int.TryParse(parts[1], out int x) && int.TryParse(parts[2], out int y))
+                {
+                    Cursor.Position = new Point(x, y);
+                }
+            }
+            else if (parts[0] == "CLICKDOWN" && parts.Length >= 4)
+            {
+                if (int.TryParse(parts[1], out int x) && int.TryParse(parts[2], out int y))
+                {
+                    Cursor.Position = new Point(x, y);
+                    if (parts[3].Contains("Left"))
+                        mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
+                    else if (parts[3].Contains("Right"))
+                        mouse_event(0x08, 0, 0, 0, UIntPtr.Zero);
+                }
+            }
+            else if (parts[0] == "CLICKUP" && parts.Length >= 2)
+            {
+                if (parts[1].Contains("Left"))
+                    mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                else if (parts[1].Contains("Right"))
+                    mouse_event(0x10, 0, 0, 0, UIntPtr.Zero);
+            }
+            else if (parts[0] == "KEY" && parts.Length >= 3)
+            {
+                if (byte.TryParse(parts[1], out byte key))
+                {
+                    uint flags = parts[2] == "True" ? 0u : 2u;
+                    keybd_event(key, 0, flags, UIntPtr.Zero);
+                }
             }
         }
         catch (Exception ex)
         {
-            Log($"Send error: {ex.Message}");
+            Log($"Command error: {ex.Message}");
         }
     }
     
-    static void ToggleFullscreen()
+    static async void CaptureAndSend()
     {
-        fullscreen = !fullscreen;
+        var jpegCodec = GetEncoder(ImageFormat.Jpeg);
+        var encoderParams = new EncoderParameters(1);
+        encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 70L);
         
-        if (fullscreen)
-        {
-            prevWindowState = form.WindowState;
-            prevBorderStyle = form.FormBorderStyle;
-            
-            form.FormBorderStyle = FormBorderStyle.None;
-            form.WindowState = FormWindowState.Normal;
-            form.Bounds = Screen.PrimaryScreen.Bounds;
-            topPanel.Visible = false;
-        }
-        else
-        {
-            form.FormBorderStyle = prevBorderStyle;
-            form.WindowState = prevWindowState;
-            topPanel.Visible = true;
-        }
+        int frameCount = 0;
+        DateTime lastLog = DateTime.Now;
         
-        Log($"Fullscreen: {fullscreen}");
+        while (running)
+        {
+            try
+            {
+                if (ws?.State != WebSocketState.Open || !hostRegistered)
+                {
+                    Thread.Sleep(1000);
+                    continue;
+                }
+                
+                using (Bitmap bmp = new Bitmap(Screen.PrimaryScreen.Bounds.Width, Screen.PrimaryScreen.Bounds.Height))
+                {
+                    using (Graphics g = Graphics.FromImage(bmp))
+                        g.CopyFromScreen(0, 0, 0, 0, bmp.Size);
+                    
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        bmp.Save(ms, jpegCodec, encoderParams);
+                        byte[] imageData = ms.ToArray();
+                        
+                        // Convert to base64 for JSON
+                        string base64 = Convert.ToBase64String(imageData);
+                        string frameJson = $"{{\"type\":\"frame\",\"data\":\"{base64}\"}}";
+                        
+                        byte[] sendData = Encoding.UTF8.GetBytes(frameJson);
+                        await ws.SendAsync(new ArraySegment<byte>(sendData), WebSocketMessageType.Text, true, CancellationToken.None);
+                        
+                        frameCount++;
+                        if ((DateTime.Now - lastLog).TotalSeconds >= 10)
+                        {
+                            Log($"Sending ~{frameCount/10}fps");
+                            frameCount = 0;
+                            lastLog = DateTime.Now;
+                        }
+                    }
+                }
+                
+                Thread.Sleep(33); // ~30fps
+            }
+            catch (Exception ex)
+            {
+                Log($"Capture error: {ex.Message}");
+                Thread.Sleep(1000);
+            }
+        }
+    }
+    
+    static void ShowDebug()
+    {
+        try
+        {
+            if (File.Exists("server_debug.txt"))
+            {
+                string content = File.ReadAllText("server_debug.txt");
+                if (content.Length > 5000)
+                    content = content.Substring(content.Length - 5000);
+                MessageBox.Show(content, "Server Debug");
+            }
+            else
+            {
+                MessageBox.Show("No debug file yet", "Server Debug");
+            }
+        }
+        catch { }
     }
     
     static void Log(string message)
@@ -286,9 +269,32 @@ class NekoLinkClient
         {
             string logMsg = $"{DateTime.Now:HH:mm:ss} - {message}";
             Console.WriteLine(logMsg);
-            log?.WriteLine(logMsg);
-            log?.Flush();
+            if (log != null)
+            {
+                log.WriteLine(logMsg);
+                log.Flush();
+            }
         }
         catch { }
     }
+    
+    static ImageCodecInfo GetEncoder(ImageFormat format)
+    {
+        foreach (ImageCodecInfo codec in ImageCodecInfo.GetImageEncoders())
+            if (codec.FormatID == format.Guid)
+                return codec;
+        return null;
+    }
+    
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+    
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern IntPtr GetConsoleWindow();
+    
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
