@@ -33,7 +33,7 @@ class NekoLinkClient
         Log("Client starting...");
         
         // Relay server URL (your Codespaces URL)
-        string relayUrl = "ws://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev";
+        string relayUrl = "wss://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev";
         
         ConnectToRelay(relayUrl).Wait();
         
