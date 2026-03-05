@@ -9,24 +9,26 @@ using System.Windows.Forms;
 
 class NekoLinkClient
 {
-    static ClientWebSocket ws;
-    static PictureBox pb;
-    static Form form;
-    static bool locked = false;
-    static Label statusLabel;
-    static DateTime lastFrame = DateTime.Now;
-    static StreamWriter log;
-    static bool fullscreen = false;
-    static FormWindowState prevWindowState;
-    static FormBorderStyle prevBorderStyle;
-    static Panel topPanel;
+    ClientWebSocket ws;
+    PictureBox pb;
+    Form form;
+    bool locked = false;
+    Label statusLabel;
+    DateTime lastFrame = DateTime.Now;
+    StreamWriter log;
+    bool fullscreen = false;
+    FormWindowState prevWindowState;
+    FormBorderStyle prevBorderStyle;
+    Panel topPanel;
     
     // Mouse throttling
-    static DateTime lastMouseSend = DateTime.Now;
-    static int lastX = -1, lastY = -1;
+    DateTime lastMouseSend = DateTime.Now;
+    int lastX = -1, lastY = -1;
     
     [STAThread]
-    static void Main()
+    static void Main() => new NekoLinkClient().Run();
+    
+    void Run()
     {
         // Setup logging
         log = new StreamWriter("client_debug.txt", true);
@@ -190,7 +192,7 @@ class NekoLinkClient
         Application.Run(form);
     }
     
-    static async Task ConnectToRelay(string relayUrl)
+    async Task ConnectToRelay(string relayUrl)
     {
         try
         {
@@ -214,7 +216,7 @@ class NekoLinkClient
         }
     }
     
-    static async Task ReceiveMessages()
+    async Task ReceiveMessages()
     {
         byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
         
@@ -228,7 +230,7 @@ class NekoLinkClient
                 {
                     string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
                     
-                    // Parse JSON (simplified - for production use Newtonsoft.Json)
+                    // Parse JSON (simplified)
                     if (message.Contains("\"type\":\"frame\""))
                     {
                         // Extract base64 data
@@ -268,7 +270,7 @@ class NekoLinkClient
         Log("Disconnected from relay");
     }
     
-    static void SendCommand(string cmd)
+    void SendCommand(string cmd)
     {
         try
         {
@@ -285,7 +287,7 @@ class NekoLinkClient
         }
     }
     
-    static void ToggleFullscreen()
+    void ToggleFullscreen()
     {
         fullscreen = !fullscreen;
         
@@ -309,7 +311,7 @@ class NekoLinkClient
         Log($"Fullscreen: {fullscreen}");
     }
     
-    static void Log(string message)
+    void Log(string message)
     {
         try
         {
