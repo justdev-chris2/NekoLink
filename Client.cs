@@ -45,7 +45,10 @@ class NekoLinkClient
         form.FormClosing += (s, e) => {
             Log("Form closing");
             log?.Close();
-            ws?.CloseAsync();
+            if (ws != null && ws.State == WebSocketState.Open)
+            {
+                try { ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None).Wait(); } catch { }
+            }
         };
         
         // Top status panel
@@ -164,6 +167,25 @@ class NekoLinkClient
             }
         };
         
+        // Start timeout check thread
+        Thread timeoutThread = new Thread(() => {
+            while (true)
+            {
+                Thread.Sleep(1000);
+                if ((DateTime.Now - lastFrame).TotalSeconds > 5)
+                {
+                    pb.Invoke((MethodInvoker)(() => {
+                        Log("Server timeout - no frames for 5 seconds");
+                        MessageBox.Show("Server stopped responding");
+                        Application.Exit();
+                    }));
+                    break;
+                }
+            }
+        });
+        timeoutThread.IsBackground = true;
+        timeoutThread.Start();
+        
         Log("Application started");
         Application.Run(form);
     }
@@ -196,7 +218,7 @@ class NekoLinkClient
     {
         byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
         
-        while (ws.State == WebSocketState.Open)
+        while (ws != null && ws.State == WebSocketState.Open)
         {
             try
             {
@@ -209,23 +231,30 @@ class NekoLinkClient
                     // Parse JSON (simplified - for production use Newtonsoft.Json)
                     if (message.Contains("\"type\":\"frame\""))
                     {
-                        // Extract base64 data (quick and dirty)
+                        // Extract base64 data
                         int dataStart = message.IndexOf("\"data\":\"") + 8;
                         int dataEnd = message.LastIndexOf("\"");
-                        string base64Data = message.Substring(dataStart, dataEnd - dataStart);
-                        
-                        byte[] imgData = Convert.FromBase64String(base64Data);
-                        
-                        using (MemoryStream ms = new MemoryStream(imgData))
+                        if (dataStart > 8 && dataEnd > dataStart)
                         {
-                            Image img = Image.FromStream(ms);
-                            pb.Invoke((MethodInvoker)(() => {
-                                pb.Image?.Dispose();
-                                pb.Image = (Image)img.Clone();
-                            }));
+                            string base64Data = message.Substring(dataStart, dataEnd - dataStart);
+                            
+                            try
+                            {
+                                byte[] imgData = Convert.FromBase64String(base64Data);
+                                
+                                using (MemoryStream ms = new MemoryStream(imgData))
+                                {
+                                    Image img = Image.FromStream(ms);
+                                    pb.Invoke((MethodInvoker)(() => {
+                                        pb.Image?.Dispose();
+                                        pb.Image = (Image)img.Clone();
+                                    }));
+                                }
+                                
+                                lastFrame = DateTime.Now;
+                            }
+                            catch { }
                         }
-                        
-                        lastFrame = DateTime.Now;
                     }
                 }
             }
@@ -243,7 +272,7 @@ class NekoLinkClient
     {
         try
         {
-            if (ws?.State == WebSocketState.Open)
+            if (ws != null && ws.State == WebSocketState.Open)
             {
                 string jsonCmd = $"{{\"type\":\"control\",\"command\":\"{cmd}\"}}";
                 byte[] data = Encoding.UTF8.GetBytes(jsonCmd);
