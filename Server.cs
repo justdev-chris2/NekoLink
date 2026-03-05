@@ -10,7 +10,7 @@ using System.Windows.Forms;
 
 class NekoLinkServer
 {
-    static string relayUrl = "https://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev";
+    static string relayUrl = ""; // server url goes here 
     static HttpClient client = new HttpClient();
     
     [STAThread]
