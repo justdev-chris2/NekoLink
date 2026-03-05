@@ -34,61 +34,78 @@ class NekoLinkClient
         statusLabel.ForeColor = Color.White;
         statusLabel.Dock = DockStyle.Fill;
         statusLabel.TextAlign = ContentAlignment.MiddleCenter;
+        statusLabel.Font = new Font("Arial", 10, FontStyle.Bold);
         topPanel.Controls.Add(statusLabel);
         
         pb = new PictureBox();
         pb.Dock = DockStyle.Fill;
         pb.SizeMode = PictureBoxSizeMode.Zoom;
+        pb.BackColor = Color.Black;
         
         form.Controls.Add(pb);
         form.Controls.Add(topPanel);
         
-        // Mouse
+        // Mouse events
         pb.MouseMove += (s, e) => {
-            if (locked)
+            if (locked && pb.Image != null)
             {
                 float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
                 float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
                 int x = (int)(e.X * ratioX);
                 int y = (int)(e.Y * ratioY);
+                x = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, x));
+                y = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, y));
                 SendCommand($"MOUSE,{x},{y}");
             }
         };
         
         pb.MouseClick += (s, e) => {
-            if (locked)
+            if (locked && pb.Image != null)
             {
                 float ratioX = (float)Screen.PrimaryScreen.Bounds.Width / pb.Width;
                 float ratioY = (float)Screen.PrimaryScreen.Bounds.Height / pb.Height;
                 int x = (int)(e.X * ratioX);
                 int y = (int)(e.Y * ratioY);
+                x = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Width - 1, x));
+                y = Math.Max(0, Math.Min(Screen.PrimaryScreen.Bounds.Height - 1, y));
                 SendCommand($"CLICK,{x},{y},{e.Button}");
             }
         };
         
+        // Click to lock
         pb.Click += (s, e) => {
             locked = true;
-            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl";
+            statusLabel.Text = "🔒 LOCKED - Press Right Ctrl to unlock";
+            statusLabel.ForeColor = Color.LightGreen;
+            form.Text = "NekoLink [LOCKED]";
         };
         
-        // Keyboard
+        // Keyboard events
         form.KeyDown += (s, e) => {
             if (e.Control && e.KeyCode == Keys.RControlKey)
             {
                 locked = false;
                 statusLabel.Text = "🔓 Unlocked - Click to lock";
+                statusLabel.ForeColor = Color.White;
+                form.Text = "NekoLink";
             }
-            if (locked)
+            
+            if (locked && !e.Control && e.KeyCode != Keys.RControlKey)
+            {
                 SendCommand($"KEY,{(byte)e.KeyCode},True");
+            }
         };
         
         form.KeyUp += (s, e) => {
-            if (locked)
+            if (locked && !e.Control && e.KeyCode != Keys.RControlKey)
+            {
                 SendCommand($"KEY,{(byte)e.KeyCode},False");
+            }
         };
         
         // Start frame receiver
         Thread frameThread = new Thread(GetFrames);
+        frameThread.IsBackground = true;
         frameThread.Start();
         
         Application.Run(form);
@@ -115,7 +132,7 @@ class NekoLinkClient
                 }
             }
             catch { }
-            Thread.Sleep(66);
+            Thread.Sleep(66); // ~15fps
         }
     }
     
