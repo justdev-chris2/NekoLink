@@ -43,7 +43,7 @@ class NekoLinkServer
         Log("Server starting...");
         
         // Connect to relay
-        string relayUrl = "ws://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev";
+        string relayUrl = "wss://fantastic-umbrella-jjpgj56jrvgvc7g9-8080.app.github.dev";
         ConnectToRelay(relayUrl).Wait();
         
         // Start screen capture thread
