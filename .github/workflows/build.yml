@@ -26,7 +26,7 @@ jobs:
     
     - name: Build Server
       run: |
-        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe /target:winexe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
+        & "$env:CSC_PATH\csc.exe" Server.cs /out:NekoLink-Server.exe /target:winexe /reference:System.Net.Http.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
       shell: pwsh
     
     - name: Build Client
