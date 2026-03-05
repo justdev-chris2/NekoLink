@@ -61,19 +61,28 @@ class NekoLinkServer
                     string cmd = response.Content.ReadAsStringAsync().Result;
                     string[] parts = cmd.Split(',');
                     
-                    if (parts[0] == "MOUSE")
-                        Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
-                    else if (parts[0] == "CLICK")
+                    if (parts[0] == "MOUSE" && parts.Length >= 3)
                     {
-                        Cursor.Position = new Point(int.Parse(parts[1]), int.Parse(parts[2]));
-                        mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
-                        Thread.Sleep(50);
-                        mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                        if (int.TryParse(parts[1], out int x) && int.TryParse(parts[2], out int y))
+                            Cursor.Position = new Point(x, y);
                     }
-                    else if (parts[0] == "KEY")
+                    else if (parts[0] == "CLICK" && parts.Length >= 4)
                     {
-                        uint flags = parts[2] == "True" ? 0u : 2u;
-                        keybd_event(byte.Parse(parts[1]), 0, flags, UIntPtr.Zero);
+                        if (int.TryParse(parts[1], out int x) && int.TryParse(parts[2], out int y))
+                        {
+                            Cursor.Position = new Point(x, y);
+                            mouse_event(0x02, 0, 0, 0, UIntPtr.Zero);
+                            Thread.Sleep(50);
+                            mouse_event(0x04, 0, 0, 0, UIntPtr.Zero);
+                        }
+                    }
+                    else if (parts[0] == "KEY" && parts.Length >= 3)
+                    {
+                        if (byte.TryParse(parts[1], out byte key))
+                        {
+                            uint flags = parts[2] == "True" ? 0u : 2u;
+                            keybd_event(key, 0, flags, UIntPtr.Zero);
+                        }
                     }
                 }
             }
