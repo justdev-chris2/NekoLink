@@ -10,15 +10,17 @@ using System.Windows.Forms;
 
 class NekoLinkServer
 {
-    static ClientWebSocket ws;
-    static NotifyIcon trayIcon;
-    static ContextMenuStrip trayMenu;
-    static bool running = true;
-    static StreamWriter log;
-    static bool hostRegistered = false;
+    ClientWebSocket ws;
+    NotifyIcon trayIcon;
+    ContextMenuStrip trayMenu;
+    bool running = true;
+    StreamWriter log;
+    bool hostRegistered = false;
     
     [STAThread]
-    static void Main()
+    static void Main() => new NekoLinkServer().Run();
+    
+    void Run()
     {
         // Force create log file immediately
         try
@@ -83,7 +85,7 @@ class NekoLinkServer
         Application.Run();
     }
     
-    static async Task ConnectToRelay(string relayUrl)
+    async Task ConnectToRelay(string relayUrl)
     {
         try
         {
@@ -108,7 +110,7 @@ class NekoLinkServer
         }
     }
     
-    static async Task ReceiveMessages()
+    async Task ReceiveMessages()
     {
         byte[] buffer = new byte[4096];
         
@@ -146,7 +148,7 @@ class NekoLinkServer
         Log("Disconnected from relay");
     }
     
-    static void ProcessCommand(string command)
+    void ProcessCommand(string command)
     {
         try
         {
@@ -193,9 +195,9 @@ class NekoLinkServer
         }
     }
     
-    static void CaptureAndSend()
+    void CaptureAndSend()
     {
-        // Get encoder with fully qualified name to avoid ambiguity
+        // Get encoder
         System.Drawing.Imaging.Encoder jpegEncoder = System.Drawing.Imaging.Encoder.Quality;
         var encoderParams = new EncoderParameters(1);
         encoderParams.Param[0] = new EncoderParameter(jpegEncoder, 70L);
@@ -260,7 +262,7 @@ class NekoLinkServer
         }
     }
     
-    static void ShowDebug()
+    void ShowDebug()
     {
         try
         {
@@ -279,7 +281,7 @@ class NekoLinkServer
         catch { }
     }
     
-    static void Log(string message)
+    void Log(string message)
     {
         try
         {
@@ -295,14 +297,14 @@ class NekoLinkServer
     }
     
     [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    extern static void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
     
     [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+    extern static void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
     
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    static extern IntPtr GetConsoleWindow();
+    extern static IntPtr GetConsoleWindow();
     
     [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    extern static bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
